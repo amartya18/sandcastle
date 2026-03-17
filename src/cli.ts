@@ -23,6 +23,7 @@ const sandboxDirOption = Options.directory("sandbox-dir").pipe(
 
 const containerOption = Options.text("container").pipe(
   Options.withDescription("Docker container name"),
+  Options.withDefault("claude-sandbox"),
 );
 
 const containerOptional = Options.text("container").pipe(
