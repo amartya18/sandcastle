@@ -369,6 +369,133 @@ describe("round-trip", () => {
   });
 });
 
+describe("parallel host commits", () => {
+  it("non-conflicting host commit between sync-in and sync-out — both changes present", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+
+    const baseHead = await syncInAndGetBase(hostDir, sandboxRepoDir, layer);
+    await initSandboxGit(sandboxRepoDir);
+
+    // Sandbox commits to a new file
+    await commitFile(
+      sandboxRepoDir,
+      "sandbox-feature.txt",
+      "sandbox work",
+      "sandbox feature commit",
+    );
+
+    // Meanwhile, host commits to a different file
+    await commitFile(
+      hostDir,
+      "host-feature.txt",
+      "host work",
+      "host feature commit",
+    );
+
+    // syncOut should succeed — changes don't conflict
+    await Effect.runPromise(
+      syncOut(hostDir, sandboxRepoDir, baseHead).pipe(Effect.provide(layer)),
+    );
+
+    // Both files should be present on host
+    const sandboxContent = await readFile(
+      join(hostDir, "sandbox-feature.txt"),
+      "utf-8",
+    );
+    expect(sandboxContent).toBe("sandbox work");
+
+    const hostContent = await readFile(
+      join(hostDir, "host-feature.txt"),
+      "utf-8",
+    );
+    expect(hostContent).toBe("host work");
+
+    // Both commits should be in history
+    const { stdout } = await execAsync("git log --oneline", { cwd: hostDir });
+    expect(stdout).toContain("sandbox feature commit");
+    expect(stdout).toContain("host feature commit");
+  });
+
+  it("host commit + sandbox uncommitted changes to different files — both present", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+
+    const baseHead = await syncInAndGetBase(hostDir, sandboxRepoDir, layer);
+
+    // Sandbox makes uncommitted changes (no commit)
+    await writeFile(join(sandboxRepoDir, "initial.txt"), "modified in sandbox");
+
+    // Host commits to a different file
+    await commitFile(
+      hostDir,
+      "host-feature.txt",
+      "host work",
+      "host feature commit",
+    );
+
+    // syncOut should succeed
+    await Effect.runPromise(
+      syncOut(hostDir, sandboxRepoDir, baseHead).pipe(Effect.provide(layer)),
+    );
+
+    // Both changes should be present
+    const sandboxContent = await readFile(
+      join(hostDir, "initial.txt"),
+      "utf-8",
+    );
+    expect(sandboxContent).toBe("modified in sandbox");
+
+    const hostContent = await readFile(
+      join(hostDir, "host-feature.txt"),
+      "utf-8",
+    );
+    expect(hostContent).toBe("host work");
+  });
+
+  it("host commit + sandbox untracked files — both present", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+
+    const baseHead = await syncInAndGetBase(hostDir, sandboxRepoDir, layer);
+
+    // Sandbox creates untracked file
+    await writeFile(
+      join(sandboxRepoDir, "sandbox-untracked.txt"),
+      "untracked content",
+    );
+
+    // Host commits to a different file
+    await commitFile(
+      hostDir,
+      "host-feature.txt",
+      "host work",
+      "host feature commit",
+    );
+
+    // syncOut should succeed
+    await Effect.runPromise(
+      syncOut(hostDir, sandboxRepoDir, baseHead).pipe(Effect.provide(layer)),
+    );
+
+    // Both should be present
+    const untrackedContent = await readFile(
+      join(hostDir, "sandbox-untracked.txt"),
+      "utf-8",
+    );
+    expect(untrackedContent).toBe("untracked content");
+
+    const hostContent = await readFile(
+      join(hostDir, "host-feature.txt"),
+      "utf-8",
+    );
+    expect(hostContent).toBe("host work");
+  });
+});
+
 describe("failure cases", () => {
   it("patch conflict — host changed between sync-in and sync-out", async () => {
     const { hostDir, sandboxRepoDir, layer } = await setup();
