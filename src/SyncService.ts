@@ -2,7 +2,8 @@ import { Effect } from "effect";
 import { execFile } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+import { type FailedStep, buildRecoveryMessage } from "./RecoveryMessage.js";
 import type { HookDefinition } from "./Config.js";
 import {
   type ExecResult,
@@ -441,10 +442,13 @@ const syncOutDirect = (
     const { patchDir, hasCommits, hasDiff, hasUntracked } =
       yield* saveArtifacts(sandbox, hostRepoDir, sandboxRepoDir, baseHead);
 
-    // Phase 2: Apply from the saved directory
+    // Phase 2: Apply from the saved directory, tracking which step we're on
+    let currentStep: FailedStep | undefined;
+
     const applyEffect = Effect.gen(function* () {
       // Apply committed patches
       if (hasCommits) {
+        currentStep = "commits";
         const patchFiles = (yield* Effect.promise(() => readdir(patchDir)))
           .filter((f) => f.endsWith(".patch") && f !== "changes.patch")
           .sort();
@@ -462,6 +466,7 @@ const syncOutDirect = (
 
       // Apply uncommitted diff
       if (hasDiff) {
+        currentStep = "diff";
         yield* execHost(
           `git apply "${join(patchDir, "changes.patch")}"`,
           hostRepoDir,
@@ -470,6 +475,7 @@ const syncOutDirect = (
 
       // Copy untracked files
       if (hasUntracked) {
+        currentStep = "untracked";
         const untrackedDir = join(patchDir, "untracked");
         const files = yield* Effect.promise(() => readdir(untrackedDir));
         for (const file of files) {
@@ -480,11 +486,24 @@ const syncOutDirect = (
       }
     });
 
-    // On success, clean up the patch directory. On failure, leave it.
+    // On success, clean up the patch directory. On failure, generate recovery message.
     yield* Effect.matchEffect(applyEffect, {
       onSuccess: () =>
         Effect.promise(() => rm(patchDir, { recursive: true, force: true })),
-      onFailure: (error) => Effect.fail(error),
+      onFailure: (error) => {
+        const relativePatchDir = relative(hostRepoDir, patchDir);
+        const recovery = currentStep
+          ? buildRecoveryMessage({
+              patchDir: relativePatchDir,
+              failedStep: currentStep,
+              hasCommits,
+              hasDiff,
+              hasUntracked,
+            })
+          : "";
+        const errorMsg = error.message + (recovery ? `\n\n${recovery}` : "");
+        return Effect.fail(new SandboxError(error.operation, errorMsg));
+      },
     });
   });
 

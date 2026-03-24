@@ -1367,4 +1367,109 @@ describe("patch artifacts", () => {
     // Second run cleaned up its own dir, so only the first one remains
     expect(allTimestamps).toHaveLength(1);
   });
+
+  it("sync-out failure includes recovery commands in error message", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await commitFile(hostDir, "shared.txt", "original", "initial commit");
+
+    const baseHead = await syncInAndGetBase(hostDir, sandboxRepoDir, layer);
+    await initSandboxGit(sandboxRepoDir);
+
+    // Sandbox modifies shared.txt (will conflict)
+    await writeFile(join(sandboxRepoDir, "shared.txt"), "sandbox version");
+    await execAsync("git add shared.txt", { cwd: sandboxRepoDir });
+    await execAsync('git commit -m "sandbox edit"', { cwd: sandboxRepoDir });
+
+    // Host also modifies shared.txt (creating a conflict)
+    await writeFile(join(hostDir, "shared.txt"), "host version");
+    await execAsync("git add shared.txt", { cwd: hostDir });
+    await execAsync('git commit -m "host edit"', { cwd: hostDir });
+
+    // syncOut should fail with recovery commands in the message
+    try {
+      await Effect.runPromise(
+        syncOut(hostDir, sandboxRepoDir, baseHead).pipe(Effect.provide(layer)),
+      );
+      throw new Error("Expected syncOut to fail");
+    } catch (error: unknown) {
+      const msg = (error as Error).message;
+      expect(msg).toContain(
+        "Patch application failed at step 1 (committed changes)",
+      );
+      expect(msg).toContain("git am --continue");
+      // Recovery commands should use relative paths
+      expect(msg).toContain(".sandcastle/patches/");
+    }
+  });
+
+  it("sync-out failure recovery commands omit steps with no artifacts", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await commitFile(hostDir, "shared.txt", "original", "initial commit");
+
+    const baseHead = await syncInAndGetBase(hostDir, sandboxRepoDir, layer);
+    await initSandboxGit(sandboxRepoDir);
+
+    // Only committed changes, no uncommitted diff or untracked files
+    await writeFile(join(sandboxRepoDir, "shared.txt"), "sandbox version");
+    await execAsync("git add shared.txt", { cwd: sandboxRepoDir });
+    await execAsync('git commit -m "sandbox edit"', { cwd: sandboxRepoDir });
+
+    // Host creates conflict
+    await writeFile(join(hostDir, "shared.txt"), "host version");
+    await execAsync("git add shared.txt", { cwd: hostDir });
+    await execAsync('git commit -m "host edit"', { cwd: hostDir });
+
+    try {
+      await Effect.runPromise(
+        syncOut(hostDir, sandboxRepoDir, baseHead).pipe(Effect.provide(layer)),
+      );
+      throw new Error("Expected syncOut to fail");
+    } catch (error: unknown) {
+      const msg = (error as Error).message;
+      // Should have git am guidance but no git apply or cp commands
+      expect(msg).toContain("git am --continue");
+      expect(msg).not.toContain("git apply");
+      expect(msg).not.toContain("cp -r");
+    }
+  });
+
+  it("sync-out failure recovery commands include all remaining steps", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await commitFile(hostDir, "shared.txt", "original", "initial commit");
+
+    const baseHead = await syncInAndGetBase(hostDir, sandboxRepoDir, layer);
+    await initSandboxGit(sandboxRepoDir);
+
+    // Sandbox makes a commit (will conflict)
+    await writeFile(join(sandboxRepoDir, "shared.txt"), "sandbox version");
+    await execAsync("git add shared.txt", { cwd: sandboxRepoDir });
+    await execAsync('git commit -m "sandbox edit"', { cwd: sandboxRepoDir });
+
+    // Sandbox also has uncommitted changes and untracked files
+    await writeFile(join(sandboxRepoDir, "shared.txt"), "uncommitted change");
+    await writeFile(join(sandboxRepoDir, "untracked.txt"), "untracked");
+
+    // Host creates conflict
+    await writeFile(join(hostDir, "shared.txt"), "host version");
+    await execAsync("git add shared.txt", { cwd: hostDir });
+    await execAsync('git commit -m "host edit"', { cwd: hostDir });
+
+    try {
+      await Effect.runPromise(
+        syncOut(hostDir, sandboxRepoDir, baseHead).pipe(Effect.provide(layer)),
+      );
+      throw new Error("Expected syncOut to fail");
+    } catch (error: unknown) {
+      const msg = (error as Error).message;
+      expect(msg).toContain("git am --continue");
+      expect(msg).toContain("git apply");
+      expect(msg).toContain("cp -r");
+      expect(msg).toContain(
+        "After all commits are applied, run the remaining steps:",
+      );
+    }
+  });
 });
