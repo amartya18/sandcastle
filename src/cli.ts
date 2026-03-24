@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { readConfig } from "./Config.js";
 import { DockerSandbox } from "./DockerSandbox.js";
 import { FilesystemSandbox } from "./FilesystemSandbox.js";
+import { DEFAULT_MODEL } from "./Orchestrator.js";
 import {
   buildImage,
   cleanupContainer,
@@ -366,7 +367,7 @@ const interactiveSession = (options: {
                     "claude",
                     "--dangerously-skip-permissions",
                     "--model",
-                    "claude-opus-4-6",
+                    DEFAULT_MODEL,
                   ],
                   { stdio: "inherit" },
                 );

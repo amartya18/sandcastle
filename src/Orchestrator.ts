@@ -5,12 +5,57 @@ import { SandboxError, type SandboxService } from "./Sandbox.js";
 import { SandboxFactory } from "./SandboxFactory.js";
 import { withSandboxLifecycle } from "./SandboxLifecycle.js";
 
+export interface TokenUsage {
+  readonly input_tokens: number;
+  readonly output_tokens: number;
+  readonly cache_read_input_tokens: number;
+  readonly cache_creation_input_tokens: number;
+  readonly total_cost_usd: number;
+  readonly num_turns: number;
+  readonly duration_ms: number;
+}
+
+export const DEFAULT_MODEL = "claude-opus-4-6";
+
+export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  "claude-opus-4-6": 200_000,
+  "claude-sonnet-4-6": 200_000,
+  "claude-haiku-4-5-20251001": 200_000,
+};
+
+const extractUsage = (obj: Record<string, unknown>): TokenUsage | null => {
+  const usage = obj.usage as Record<string, unknown> | undefined;
+  if (
+    !usage ||
+    typeof usage.input_tokens !== "number" ||
+    typeof usage.output_tokens !== "number"
+  ) {
+    return null;
+  }
+  return {
+    input_tokens: usage.input_tokens,
+    output_tokens: usage.output_tokens,
+    cache_read_input_tokens:
+      typeof usage.cache_read_input_tokens === "number"
+        ? usage.cache_read_input_tokens
+        : 0,
+    cache_creation_input_tokens:
+      typeof usage.cache_creation_input_tokens === "number"
+        ? usage.cache_creation_input_tokens
+        : 0,
+    total_cost_usd:
+      typeof obj.total_cost_usd === "number" ? obj.total_cost_usd : 0,
+    num_turns: typeof obj.num_turns === "number" ? obj.num_turns : 0,
+    duration_ms: typeof obj.duration_ms === "number" ? obj.duration_ms : 0,
+  };
+};
+
 /** Extract displayable text from a stream-json line */
 export const parseStreamJsonLine = (
   line: string,
 ):
   | { type: "text"; text: string }
-  | { type: "result"; result: string }
+  | { type: "result"; result: string; usage: TokenUsage | null }
   | null => {
   if (!line.startsWith("{")) return null;
   try {
@@ -22,7 +67,7 @@ export const parseStreamJsonLine = (
       if (texts.length > 0) return { type: "text", text: texts.join("") };
     }
     if (obj.type === "result" && typeof obj.result === "string") {
-      return { type: "result", result: obj.result };
+      return { type: "result", result: obj.result, usage: extractUsage(obj) };
     }
   } catch {
     // Not valid JSON — skip
@@ -34,18 +79,20 @@ const invokeAgent = (
   sandbox: SandboxService,
   sandboxRepoDir: string,
   prompt: string,
-): Effect.Effect<string, SandboxError> =>
+): Effect.Effect<{ result: string; usage: TokenUsage | null }, SandboxError> =>
   Effect.gen(function* () {
     let resultText = "";
+    let tokenUsage: TokenUsage | null = null;
 
     const execResult = yield* sandbox.execStreaming(
-      `claude --print --verbose --dangerously-skip-permissions --output-format stream-json --model claude-opus-4-6 -p ${shellEscape(prompt)}`,
+      `claude --print --verbose --dangerously-skip-permissions --output-format stream-json --model ${DEFAULT_MODEL} -p ${shellEscape(prompt)}`,
       (line) => {
         const parsed = parseStreamJsonLine(line);
         if (parsed?.type === "text") {
           console.log(parsed.text);
         } else if (parsed?.type === "result") {
           resultText = parsed.result;
+          tokenUsage = parsed.usage;
         }
       },
       { cwd: sandboxRepoDir },
@@ -60,10 +107,29 @@ const invokeAgent = (
       );
     }
 
-    return resultText || execResult.stdout;
+    return { result: resultText || execResult.stdout, usage: tokenUsage };
   });
 
 const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
+
+const formatNumber = (n: number): string => n.toLocaleString("en-US");
+
+export const formatUsageLine = (usage: TokenUsage, model: string): string => {
+  const parts: string[] = [
+    `Tokens: ${formatNumber(usage.input_tokens)} in / ${formatNumber(usage.output_tokens)} out`,
+  ];
+
+  const contextWindow = MODEL_CONTEXT_WINDOWS[model];
+  if (contextWindow) {
+    const pct = ((usage.input_tokens / contextWindow) * 100).toFixed(1);
+    parts.push(`Context: ${pct}%`);
+  }
+
+  parts.push(`Cost: $${usage.total_cost_usd.toFixed(2)}`);
+  parts.push(`Turns: ${usage.num_turns}`);
+
+  return parts.join(" | ");
+};
 
 const COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
 
@@ -106,11 +172,16 @@ export const orchestrate = (
 
               // Invoke the agent
               yield* Console.log("Running agent...");
-              const agentOutput = yield* invokeAgent(
+              const { result: agentOutput, usage } = yield* invokeAgent(
                 ctx.sandbox,
                 ctx.sandboxRepoDir,
                 fullPrompt,
               );
+
+              // Log usage summary
+              if (usage) {
+                yield* Console.log(formatUsageLine(usage, DEFAULT_MODEL));
+              }
 
               // Check completion signal
               if (agentOutput.includes(COMPLETION_SIGNAL)) {

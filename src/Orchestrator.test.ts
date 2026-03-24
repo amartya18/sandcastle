@@ -362,6 +362,7 @@ describe("parseStreamJsonLine", () => {
     expect(parseStreamJsonLine(line)).toEqual({
       type: "result",
       result: "Final answer <promise>COMPLETE</promise>",
+      usage: null,
     });
   });
 
@@ -407,6 +408,63 @@ describe("parseStreamJsonLine", () => {
       },
     });
     expect(parseStreamJsonLine(line)).toEqual({ type: "text", text: "result" });
+  });
+
+  it("extracts usage data from result message", () => {
+    const line = JSON.stringify({
+      type: "result",
+      result: "Done.",
+      total_cost_usd: 0.14,
+      num_turns: 3,
+      duration_ms: 12000,
+      usage: {
+        input_tokens: 52340,
+        output_tokens: 3201,
+        cache_read_input_tokens: 10000,
+        cache_creation_input_tokens: 5000,
+      },
+    });
+    const parsed = parseStreamJsonLine(line);
+    expect(parsed).toEqual({
+      type: "result",
+      result: "Done.",
+      usage: {
+        input_tokens: 52340,
+        output_tokens: 3201,
+        cache_read_input_tokens: 10000,
+        cache_creation_input_tokens: 5000,
+        total_cost_usd: 0.14,
+        num_turns: 3,
+        duration_ms: 12000,
+      },
+    });
+  });
+
+  it("returns null usage when result message has no usage data", () => {
+    const line = JSON.stringify({
+      type: "result",
+      result: "Done.",
+    });
+    const parsed = parseStreamJsonLine(line);
+    expect(parsed).toEqual({
+      type: "result",
+      result: "Done.",
+      usage: null,
+    });
+  });
+
+  it("returns null usage when usage fields are partial", () => {
+    const line = JSON.stringify({
+      type: "result",
+      result: "Done.",
+      usage: { input_tokens: 100 },
+    });
+    const parsed = parseStreamJsonLine(line);
+    expect(parsed).toEqual({
+      type: "result",
+      result: "Done.",
+      usage: null,
+    });
   });
 });
 
