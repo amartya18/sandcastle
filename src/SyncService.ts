@@ -68,15 +68,19 @@ export const runHooks = (
 export const syncIn = (
   hostRepoDir: string,
   sandboxRepoDir: string,
+  options?: { branch?: string },
 ): Effect.Effect<{ branch: string }, SandboxError, Sandbox> =>
   Effect.gen(function* () {
     const sandbox = yield* Sandbox;
 
     // Get current branch from host
-    const branch = (yield* execHost(
+    const hostBranch = (yield* execHost(
       "git rev-parse --abbrev-ref HEAD",
       hostRepoDir,
     )).trim();
+
+    // The branch to check out in the sandbox
+    const branch = options?.branch ?? hostBranch;
 
     // Create git bundle on host
     const bundleDir = yield* Effect.promise(() =>
@@ -101,23 +105,33 @@ export const syncIn = (
     );
     const repoExists = gitCheck.stdout.trim() === "yes";
 
+    // Determine if --branch specifies a new branch (not in the bundle)
+    const isNewBranch = branch !== hostBranch;
+
     if (repoExists) {
       // Fetch bundle into temp ref, reset to match host
       yield* execOk(
         sandbox,
-        `git fetch "${bundleSandboxPath}" "${branch}:refs/sandcastle/sync" --force`,
+        `git fetch "${bundleSandboxPath}" "${hostBranch}:refs/sandcastle/sync" --force`,
         { cwd: sandboxRepoDir },
       );
-      yield* execOk(
-        sandbox,
-        `git checkout -B "${branch}" refs/sandcastle/sync`,
-        {
+      if (isNewBranch) {
+        // Create new branch from host HEAD
+        yield* execOk(
+          sandbox,
+          `git checkout -B "${branch}" refs/sandcastle/sync`,
+          { cwd: sandboxRepoDir },
+        );
+      } else {
+        yield* execOk(
+          sandbox,
+          `git checkout -B "${branch}" refs/sandcastle/sync`,
+          { cwd: sandboxRepoDir },
+        );
+        yield* execOk(sandbox, "git reset --hard refs/sandcastle/sync", {
           cwd: sandboxRepoDir,
-        },
-      );
-      yield* execOk(sandbox, "git reset --hard refs/sandcastle/sync", {
-        cwd: sandboxRepoDir,
-      });
+        });
+      }
       yield* execOk(sandbox, "git clean -fdx -e node_modules", {
         cwd: sandboxRepoDir,
       });
@@ -127,9 +141,15 @@ export const syncIn = (
         sandbox,
         `git clone "${bundleSandboxPath}" "${sandboxRepoDir}"`,
       );
-      yield* execOk(sandbox, `git checkout "${branch}"`, {
+      yield* execOk(sandbox, `git checkout "${hostBranch}"`, {
         cwd: sandboxRepoDir,
       });
+      if (isNewBranch) {
+        // Create new branch from host HEAD
+        yield* execOk(sandbox, `git checkout -b "${branch}"`, {
+          cwd: sandboxRepoDir,
+        });
+      }
     }
 
     // Configure remotes from host
@@ -203,77 +223,46 @@ export const syncOut = (
   hostRepoDir: string,
   sandboxRepoDir: string,
   baseHead: string,
+  options?: { branch?: string },
 ): Effect.Effect<void, SandboxError, Sandbox> =>
   Effect.gen(function* () {
     const sandbox = yield* Sandbox;
 
+    // Determine if we need worktree-based sync
+    const targetBranch = options?.branch;
+    const hostBranch = targetBranch
+      ? (yield* execHost("git rev-parse --abbrev-ref HEAD", hostRepoDir)).trim()
+      : undefined;
+    const useWorktree = targetBranch != null && targetBranch !== hostBranch;
+
+    if (useWorktree) {
+      yield* syncOutViaWorktree(
+        sandbox,
+        hostRepoDir,
+        sandboxRepoDir,
+        baseHead,
+        targetBranch,
+      );
+    } else {
+      yield* syncOutDirect(sandbox, hostRepoDir, sandboxRepoDir, baseHead);
+    }
+  });
+
+/** Apply patches directly to the host's current branch (existing behavior) */
+const syncOutDirect = (
+  sandbox: SandboxService,
+  hostRepoDir: string,
+  sandboxRepoDir: string,
+  baseHead: string,
+): Effect.Effect<void, SandboxError> =>
+  Effect.gen(function* () {
     // --- 1. Sync commits via format-patch / git am ---
     const sandboxHead = (yield* execOk(sandbox, "git rev-parse HEAD", {
       cwd: sandboxRepoDir,
     })).stdout.trim();
 
     if (sandboxHead !== baseHead) {
-      // Count new commits
-      const countResult = yield* execOk(
-        sandbox,
-        `git rev-list "${baseHead}..HEAD" --count`,
-        { cwd: sandboxRepoDir },
-      );
-      const commitCount = parseInt(countResult.stdout.trim(), 10);
-
-      if (commitCount > 0) {
-        // Generate patches in sandbox
-        const sandboxPatchDir = (yield* execOk(
-          sandbox,
-          "mktemp -d -t sandcastle-patches-XXXXXX",
-        )).stdout.trim();
-
-        yield* execOk(
-          sandbox,
-          `git format-patch "${baseHead}..HEAD" -o "${sandboxPatchDir}"`,
-          { cwd: sandboxRepoDir },
-        );
-
-        // Create host-side temp dir for patches
-        const hostPatchDir = yield* Effect.promise(() =>
-          mkdtemp(join(tmpdir(), "sandcastle-patches-")),
-        );
-
-        // List patch files and copy them out
-        const patchListResult = yield* execOk(
-          sandbox,
-          `ls "${sandboxPatchDir}"/*.patch`,
-        );
-        const patchFiles = patchListResult.stdout
-          .trim()
-          .split("\n")
-          .filter((f) => f.length > 0);
-
-        for (const sandboxPatchPath of patchFiles) {
-          const filename = sandboxPatchPath.split("/").pop()!;
-          const hostPatchPath = join(hostPatchDir, filename);
-          yield* sandbox.copyOut(sandboxPatchPath, hostPatchPath);
-        }
-
-        // Abort any leftover git am session
-        yield* Effect.ignore(execHost("git am --abort", hostRepoDir));
-
-        // Apply patches in order
-        const sortedFiles = (yield* Effect.promise(() => readdir(hostPatchDir)))
-          .filter((f) => f.endsWith(".patch"))
-          .sort();
-
-        for (const file of sortedFiles) {
-          yield* execHost(
-            `git am --3way "${join(hostPatchDir, file)}"`,
-            hostRepoDir,
-          );
-        }
-
-        // Clean up
-        yield* sandbox.exec(`rm -rf "${sandboxPatchDir}"`);
-        yield* Effect.promise(() => rm(hostPatchDir, { recursive: true }));
-      }
+      yield* applyPatches(sandbox, hostRepoDir, sandboxRepoDir, baseHead);
     }
 
     // --- 2. Sync uncommitted changes ---
@@ -322,5 +311,169 @@ export const syncOut = (
         const hostFilePath = join(hostRepoDir, file);
         yield* sandbox.copyOut(sandboxFilePath, hostFilePath);
       }
+    }
+  });
+
+/** Apply committed patches to a target branch via a temporary git worktree */
+const syncOutViaWorktree = (
+  sandbox: SandboxService,
+  hostRepoDir: string,
+  sandboxRepoDir: string,
+  baseHead: string,
+  targetBranch: string,
+): Effect.Effect<void, SandboxError> =>
+  Effect.gen(function* () {
+    // Check if there are new commits to apply
+    const sandboxHead = (yield* execOk(sandbox, "git rev-parse HEAD", {
+      cwd: sandboxRepoDir,
+    })).stdout.trim();
+
+    if (sandboxHead === baseHead) {
+      // No commits — nothing to do
+      return;
+    }
+
+    const countResult = yield* execOk(
+      sandbox,
+      `git rev-list "${baseHead}..HEAD" --count`,
+      { cwd: sandboxRepoDir },
+    );
+    const commitCount = parseInt(countResult.stdout.trim(), 10);
+    if (commitCount === 0) return;
+
+    // Generate and copy patches
+    const hostPatchDir = yield* generateAndCopyPatches(
+      sandbox,
+      sandboxRepoDir,
+      baseHead,
+    );
+
+    // Create worktree, apply patches, clean up
+    const worktreeDir = yield* Effect.promise(() =>
+      mkdtemp(join(tmpdir(), "sandcastle-worktree-")),
+    );
+
+    yield* Effect.ensuring(
+      // Try: create worktree and apply patches
+      Effect.gen(function* () {
+        // Create worktree with a new branch from the current HEAD
+        yield* execHost(
+          `git worktree add "${worktreeDir}/wt" -b "${targetBranch}" HEAD`,
+          hostRepoDir,
+        );
+
+        // Abort any leftover git am session
+        yield* Effect.ignore(execHost("git am --abort", `${worktreeDir}/wt`));
+
+        // Apply patches in the worktree
+        const sortedFiles = (yield* Effect.promise(() => readdir(hostPatchDir)))
+          .filter((f) => f.endsWith(".patch"))
+          .sort();
+
+        for (const file of sortedFiles) {
+          yield* execHost(
+            `git am --3way "${join(hostPatchDir, file)}"`,
+            `${worktreeDir}/wt`,
+          );
+        }
+      }),
+      // Finally: always clean up worktree
+      Effect.gen(function* () {
+        yield* Effect.ignore(
+          execHost(
+            `git worktree remove "${worktreeDir}/wt" --force`,
+            hostRepoDir,
+          ),
+        );
+        yield* Effect.promise(() =>
+          rm(worktreeDir, { recursive: true, force: true }),
+        );
+        yield* Effect.promise(() =>
+          rm(hostPatchDir, { recursive: true, force: true }),
+        );
+      }),
+    );
+  });
+
+/** Generate format-patch files in sandbox and copy them to host temp dir */
+const generateAndCopyPatches = (
+  sandbox: SandboxService,
+  sandboxRepoDir: string,
+  baseHead: string,
+): Effect.Effect<string, SandboxError> =>
+  Effect.gen(function* () {
+    const sandboxPatchDir = (yield* execOk(
+      sandbox,
+      "mktemp -d -t sandcastle-patches-XXXXXX",
+    )).stdout.trim();
+
+    yield* execOk(
+      sandbox,
+      `git format-patch "${baseHead}..HEAD" -o "${sandboxPatchDir}"`,
+      { cwd: sandboxRepoDir },
+    );
+
+    const hostPatchDir = yield* Effect.promise(() =>
+      mkdtemp(join(tmpdir(), "sandcastle-patches-")),
+    );
+
+    const patchListResult = yield* execOk(
+      sandbox,
+      `ls "${sandboxPatchDir}"/*.patch`,
+    );
+    const patchFiles = patchListResult.stdout
+      .trim()
+      .split("\n")
+      .filter((f) => f.length > 0);
+
+    for (const sandboxPatchPath of patchFiles) {
+      const filename = sandboxPatchPath.split("/").pop()!;
+      const hostPatchPath = join(hostPatchDir, filename);
+      yield* sandbox.copyOut(sandboxPatchPath, hostPatchPath);
+    }
+
+    yield* sandbox.exec(`rm -rf "${sandboxPatchDir}"`);
+
+    return hostPatchDir;
+  });
+
+/** Apply patches directly to a host repo dir */
+const applyPatches = (
+  sandbox: SandboxService,
+  hostRepoDir: string,
+  sandboxRepoDir: string,
+  baseHead: string,
+): Effect.Effect<void, SandboxError> =>
+  Effect.gen(function* () {
+    const countResult = yield* execOk(
+      sandbox,
+      `git rev-list "${baseHead}..HEAD" --count`,
+      { cwd: sandboxRepoDir },
+    );
+    const commitCount = parseInt(countResult.stdout.trim(), 10);
+
+    if (commitCount > 0) {
+      const hostPatchDir = yield* generateAndCopyPatches(
+        sandbox,
+        sandboxRepoDir,
+        baseHead,
+      );
+
+      // Abort any leftover git am session
+      yield* Effect.ignore(execHost("git am --abort", hostRepoDir));
+
+      // Apply patches in order
+      const sortedFiles = (yield* Effect.promise(() => readdir(hostPatchDir)))
+        .filter((f) => f.endsWith(".patch"))
+        .sort();
+
+      for (const file of sortedFiles) {
+        yield* execHost(
+          `git am --3way "${join(hostPatchDir, file)}"`,
+          hostRepoDir,
+        );
+      }
+
+      yield* Effect.promise(() => rm(hostPatchDir, { recursive: true }));
     }
   });

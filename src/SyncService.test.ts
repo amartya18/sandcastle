@@ -775,6 +775,243 @@ describe("git remotes", () => {
   });
 });
 
+describe("--branch syncIn", () => {
+  it("creates new branch in sandbox from host HEAD when branch doesn't exist", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await commitFile(hostDir, "base.txt", "base", "initial commit");
+
+    const result = await Effect.runPromise(
+      syncIn(hostDir, sandboxRepoDir, { branch: "feature/test" }).pipe(
+        Effect.provide(layer),
+      ),
+    );
+
+    // Should return the --branch value as the branch name
+    expect(result.branch).toBe("feature/test");
+    // Sandbox should be on the new branch
+    expect(await getBranch(sandboxRepoDir)).toBe("feature/test");
+    // HEAD should match host HEAD (branched from it)
+    expect(await getHead(sandboxRepoDir)).toBe(await getHead(hostDir));
+  });
+
+  it("omitting --branch preserves existing behavior", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await commitFile(hostDir, "base.txt", "base", "initial commit");
+
+    const result = await Effect.runPromise(
+      syncIn(hostDir, sandboxRepoDir).pipe(Effect.provide(layer)),
+    );
+
+    expect(result.branch).toBe("main");
+    expect(await getBranch(sandboxRepoDir)).toBe("main");
+  });
+});
+
+describe("--branch syncOut", () => {
+  it("applies patches to target branch via worktree, host branch unchanged", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await commitFile(hostDir, "base.txt", "base", "initial commit");
+
+    // syncIn with --branch creates the new branch in sandbox
+    await Effect.runPromise(
+      syncIn(hostDir, sandboxRepoDir, { branch: "feature/test" }).pipe(
+        Effect.provide(layer),
+      ),
+    );
+    const baseHead = await getHead(sandboxRepoDir);
+    await initSandboxGit(sandboxRepoDir);
+
+    // Agent makes commits on the branch in sandbox
+    await commitFile(
+      sandboxRepoDir,
+      "feature.txt",
+      "feature work",
+      "add feature",
+    );
+    await commitFile(
+      sandboxRepoDir,
+      "feature2.txt",
+      "more work",
+      "add feature2",
+    );
+
+    // syncOut with --branch should use worktree
+    await Effect.runPromise(
+      syncOut(hostDir, sandboxRepoDir, baseHead, {
+        branch: "feature/test",
+      }).pipe(Effect.provide(layer)),
+    );
+
+    // Host's checked-out branch should be unchanged
+    expect(await getBranch(hostDir)).toBe("main");
+
+    // Target branch should exist and have the commits
+    const { stdout: log } = await execAsync("git log --oneline feature/test", {
+      cwd: hostDir,
+    });
+    expect(log).toContain("add feature");
+    expect(log).toContain("add feature2");
+
+    // Files should be on the target branch
+    const { stdout: content } = await execAsync(
+      "git show feature/test:feature.txt",
+      { cwd: hostDir },
+    );
+    expect(content.trim()).toBe("feature work");
+
+    // Host working tree is undisturbed
+    const { stdout: status } = await execAsync("git status --porcelain", {
+      cwd: hostDir,
+    });
+    expect(status.trim()).toBe("");
+  });
+
+  it("worktree is cleaned up after successful sync-out", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await commitFile(hostDir, "base.txt", "base", "initial commit");
+
+    await Effect.runPromise(
+      syncIn(hostDir, sandboxRepoDir, { branch: "feature/wt-cleanup" }).pipe(
+        Effect.provide(layer),
+      ),
+    );
+    const baseHead = await getHead(sandboxRepoDir);
+    await initSandboxGit(sandboxRepoDir);
+    await commitFile(sandboxRepoDir, "f.txt", "f", "commit");
+
+    await Effect.runPromise(
+      syncOut(hostDir, sandboxRepoDir, baseHead, {
+        branch: "feature/wt-cleanup",
+      }).pipe(Effect.provide(layer)),
+    );
+
+    // No worktrees should remain (only the main one)
+    const { stdout: worktrees } = await execAsync("git worktree list", {
+      cwd: hostDir,
+    });
+    expect(worktrees.trim().split("\n")).toHaveLength(1);
+  });
+
+  it("worktree is cleaned up after failed sync-out", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await commitFile(hostDir, "shared.txt", "original", "initial commit");
+
+    await Effect.runPromise(
+      syncIn(hostDir, sandboxRepoDir, { branch: "feature/wt-fail" }).pipe(
+        Effect.provide(layer),
+      ),
+    );
+    const baseHead = await getHead(sandboxRepoDir);
+    await initSandboxGit(sandboxRepoDir);
+
+    // Sandbox modifies shared.txt
+    await writeFile(join(sandboxRepoDir, "shared.txt"), "sandbox version");
+    await execAsync("git add shared.txt", { cwd: sandboxRepoDir });
+    await execAsync('git commit -m "sandbox edit"', { cwd: sandboxRepoDir });
+
+    // Create the target branch on host with a conflicting change
+    await execAsync("git checkout -b feature/wt-fail", { cwd: hostDir });
+    await writeFile(join(hostDir, "shared.txt"), "host version");
+    await execAsync("git add shared.txt", { cwd: hostDir });
+    await execAsync('git commit -m "host edit"', { cwd: hostDir });
+    await execAsync("git checkout main", { cwd: hostDir });
+
+    // syncOut should fail due to conflict
+    await expect(
+      Effect.runPromise(
+        syncOut(hostDir, sandboxRepoDir, baseHead, {
+          branch: "feature/wt-fail",
+        }).pipe(Effect.provide(layer)),
+      ),
+    ).rejects.toThrow();
+
+    // Worktree should still be cleaned up
+    const { stdout: worktrees } = await execAsync("git worktree list", {
+      cwd: hostDir,
+    });
+    expect(worktrees.trim().split("\n")).toHaveLength(1);
+  });
+});
+
+describe("--branch round-trip", () => {
+  it("full round-trip: sync-in (new branch) → sandbox commits → sync-out → host has branch with commits", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await commitFile(hostDir, "base.txt", "base", "initial on main");
+
+    // Sync-in with --branch
+    const syncInResult = await Effect.runPromise(
+      syncIn(hostDir, sandboxRepoDir, { branch: "feature/roundtrip" }).pipe(
+        Effect.provide(layer),
+      ),
+    );
+    expect(syncInResult.branch).toBe("feature/roundtrip");
+
+    const baseHead = await getHead(sandboxRepoDir);
+    await initSandboxGit(sandboxRepoDir);
+
+    // Agent makes commits
+    await commitFile(
+      sandboxRepoDir,
+      "feat1.txt",
+      "feature 1",
+      "first feature commit",
+    );
+    await commitFile(
+      sandboxRepoDir,
+      "feat2.txt",
+      "feature 2",
+      "second feature commit",
+    );
+
+    // Sync-out with --branch
+    await Effect.runPromise(
+      syncOut(hostDir, sandboxRepoDir, baseHead, {
+        branch: "feature/roundtrip",
+      }).pipe(Effect.provide(layer)),
+    );
+
+    // Host's main branch is unchanged
+    expect(await getBranch(hostDir)).toBe("main");
+    const { stdout: mainLog } = await execAsync("git log --oneline main", {
+      cwd: hostDir,
+    });
+    expect(mainLog.trim().split("\n")).toHaveLength(1); // only initial commit
+
+    // Target branch has all commits
+    const { stdout: branchLog } = await execAsync(
+      "git log --oneline feature/roundtrip",
+      { cwd: hostDir },
+    );
+    expect(branchLog).toContain("first feature commit");
+    expect(branchLog).toContain("second feature commit");
+    expect(branchLog).toContain("initial on main");
+
+    // Files accessible on the branch
+    const { stdout: f1 } = await execAsync(
+      "git show feature/roundtrip:feat1.txt",
+      { cwd: hostDir },
+    );
+    expect(f1.trim()).toBe("feature 1");
+    const { stdout: f2 } = await execAsync(
+      "git show feature/roundtrip:feat2.txt",
+      { cwd: hostDir },
+    );
+    expect(f2.trim()).toBe("feature 2");
+
+    // Host working tree is clean
+    const { stdout: status } = await execAsync("git status --porcelain", {
+      cwd: hostDir,
+    });
+    expect(status.trim()).toBe("");
+  });
+});
+
 describe("hooks", () => {
   it("onSandboxReady hooks run after sync-in and effects are visible", async () => {
     const { hostDir, sandboxRepoDir, layer } = await setup();

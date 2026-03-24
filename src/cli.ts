@@ -241,6 +241,11 @@ const promptFileOption = Options.file("prompt-file").pipe(
   Options.optional,
 );
 
+const branchOption = Options.text("branch").pipe(
+  Options.withDescription("Target branch name for sandbox work"),
+  Options.optional,
+);
+
 const detectRepoFullName = (cwd: string): Effect.Effect<string, SandboxError> =>
   Effect.async((resume) => {
     execFile(
@@ -270,8 +275,9 @@ const runCommand = Command.make(
     iterations: iterationsOption,
     imageName: imageNameOption,
     promptFile: promptFileOption,
+    branch: branchOption,
   },
-  ({ iterations, imageName, promptFile }) =>
+  ({ iterations, imageName, promptFile, branch }) =>
     Effect.gen(function* () {
       const hostRepoDir = process.cwd();
       yield* requireConfigDir(hostRepoDir);
@@ -309,10 +315,15 @@ const runCommand = Command.make(
           ? iterations.value
           : (config.defaultIterations ?? 5);
 
+      const resolvedBranch = branch._tag === "Some" ? branch.value : undefined;
+
       yield* Console.log(`=== SANDCASTLE RUN ===`);
       yield* Console.log(`Repo:       ${repoFullName}`);
       yield* Console.log(`Image:      ${imageName}`);
       yield* Console.log(`Iterations: ${resolvedIterations}`);
+      if (resolvedBranch) {
+        yield* Console.log(`Branch:     ${resolvedBranch}`);
+      }
       yield* Console.log(``);
 
       const factoryLayer = DockerSandboxFactory.layer(
@@ -328,6 +339,7 @@ const runCommand = Command.make(
         config,
         repoFullName,
         prompt,
+        branch: resolvedBranch,
       }).pipe(Effect.provide(factoryLayer));
 
       if (result.complete) {

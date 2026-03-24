@@ -101,6 +101,7 @@ export interface OrchestrateOptions {
   readonly config?: SandcastleConfig;
   readonly repoFullName: string;
   readonly prompt: string;
+  readonly branch?: string;
 }
 
 export interface OrchestrateResult {
@@ -120,6 +121,7 @@ export const orchestrate = (
       config,
       repoFullName,
       prompt,
+      branch,
     } = options;
 
     for (let i = 1; i <= iterations; i++) {
@@ -127,7 +129,7 @@ export const orchestrate = (
 
       const iterationResult = yield* factory.withSandbox(
         withSandboxLifecycle(
-          { hostRepoDir, sandboxRepoDir, hooks: config?.hooks },
+          { hostRepoDir, sandboxRepoDir, hooks: config?.hooks, branch },
           (ctx) =>
             Effect.gen(function* () {
               // Fetch context

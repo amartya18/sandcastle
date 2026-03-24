@@ -7,6 +7,7 @@ export interface SandboxLifecycleOptions {
   readonly hostRepoDir: string;
   readonly sandboxRepoDir: string;
   readonly hooks?: SandcastleConfig["hooks"];
+  readonly branch?: string;
 }
 
 export interface SandboxContext {
@@ -21,13 +22,13 @@ export const withSandboxLifecycle = <A>(
 ): Effect.Effect<A, SandboxError, Sandbox> =>
   Effect.gen(function* () {
     const sandbox = yield* Sandbox;
-    const { hostRepoDir, sandboxRepoDir, hooks } = options;
+    const { hostRepoDir, sandboxRepoDir, hooks, branch } = options;
 
     // Run onSandboxCreate hooks (before sync-in)
     yield* runHooks(hooks?.onSandboxCreate);
 
     // Sync-in
-    yield* syncIn(hostRepoDir, sandboxRepoDir);
+    yield* syncIn(hostRepoDir, sandboxRepoDir, branch ? { branch } : undefined);
 
     // Run onSandboxReady hooks (after sync-in)
     yield* runHooks(hooks?.onSandboxReady, { cwd: sandboxRepoDir });
@@ -41,7 +42,12 @@ export const withSandboxLifecycle = <A>(
     const result = yield* work({ sandbox, sandboxRepoDir, baseHead });
 
     // Sync-out
-    yield* syncOut(hostRepoDir, sandboxRepoDir, baseHead);
+    yield* syncOut(
+      hostRepoDir,
+      sandboxRepoDir,
+      baseHead,
+      branch ? { branch } : undefined,
+    );
 
     return result;
   });
