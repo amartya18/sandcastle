@@ -24,9 +24,16 @@ If all tasks are complete, output <promise>COMPLETE</promise>.
 
 Explore the repo and fill your context window with relevant information that will allow you to complete the task.
 
+Pay extra attention to test files that touch the relevant parts of the code.
+
 # EXECUTION
 
-Complete the task.
+Use RGR to complete the task.
+
+1. RED: write one test
+2. GREEN: write the implementation to pass that test
+3. REPEAT until done
+4. REFACTOR the code
 
 # COMMIT
 
