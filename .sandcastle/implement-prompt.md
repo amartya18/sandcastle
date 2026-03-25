@@ -4,6 +4,8 @@ Fix issue #{{ISSUE_NUMBER}}: {{ISSUE_TITLE}}
 
 Pull in the issue using `gh issue view`. If it has a parent PRD, pull that in too.
 
+Only work on the issue specified.
+
 Work on branch {{BRANCH}}. Make commits, run tests, and close the issue when done.
 
 # CONTEXT
@@ -49,11 +51,11 @@ Keep it concise.
 
 # THE ISSUE
 
-If the task is complete, close the original GitHub issue.
-
 If the task is not complete, leave a comment on the GitHub issue with what was done.
 
-If complete, output <promise>COMPLETE</promise>.
+Do not close the issue - this will be done later.
+
+Once complete, output <promise>COMPLETE</promise>.
 
 # FINAL RULES
 

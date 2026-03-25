@@ -13,4 +13,10 @@ For each branch:
 
 After all branches are merged, make a single commit summarizing the merge.
 
-If all merges succeed, output <promise>COMPLETE</promise>.
+# CLOSE ISSUES
+
+For each branch that was merged, close its issue. Here are all the issues:
+
+{{ISSUES}}
+
+Once you've merged everything you can, output <promise>COMPLETE</promise>.

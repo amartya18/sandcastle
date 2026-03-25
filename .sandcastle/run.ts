@@ -41,7 +41,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   }
 
   // Phase 2: Execute — spawn N agents in parallel, each on a separate branch
-  const results = await Promise.all(
+  const settled = await Promise.allSettled(
     issues.map((issue) =>
       sandcastle.run({
         hooks,
@@ -58,9 +58,31 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     ),
   );
 
-  const completedBranches = results
-    .filter((r) => r.commits.length > 0)
-    .map((r) => r.branch);
+  for (const [i, outcome] of settled.entries()) {
+    if (outcome.status === "rejected") {
+      console.error(
+        `  ✗ #${issues[i].number} (${issues[i].branch}) failed: ${outcome.reason}`,
+      );
+    }
+  }
+
+  const completedIssues = settled
+    .map((outcome, i) => ({ outcome, issue: issues[i] }))
+    .filter(
+      (
+        entry,
+      ): entry is {
+        outcome: PromiseFulfilledResult<
+          Awaited<ReturnType<typeof sandcastle.run>>
+        >;
+        issue: (typeof issues)[number];
+      } =>
+        entry.outcome.status === "fulfilled" &&
+        entry.outcome.value.commits.length > 0,
+    )
+    .map((entry) => entry.issue);
+
+  const completedBranches = completedIssues.map((i) => i.branch);
 
   console.log(
     `\nExecution complete. ${completedBranches.length} branch(es) with commits:`,
@@ -82,6 +104,9 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     promptFile: "./.sandcastle/merge-prompt.md",
     promptArgs: {
       BRANCHES: completedBranches.map((b) => `- ${b}`).join("\n"),
+      ISSUES: completedIssues
+        .map((i) => `- #${i.number}: ${i.title}`)
+        .join("\n"),
     },
   });
 
