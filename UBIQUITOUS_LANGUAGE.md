@@ -73,14 +73,23 @@
 ## Example dialogue
 
 > **Dev:** "How do I test the **sync service** without Docker?"
+
 > **Domain expert:** "Provide the **filesystem layer** instead of the **Docker layer**. It implements the same **Sandbox service** interface but uses a local directory as the **sandbox**."
+
 > **Dev:** "So **sync-in** still creates a **bundle** and unpacks it?"
+
 > **Domain expert:** "Exactly. The **sync service** doesn't know which layer it's talking to. It calls `exec` and `copyIn` — the **filesystem layer** just runs those as local shell commands."
+
 > **Dev:** "And when the **agent** makes a commit in the **sandbox**, **sync-out** extracts the **patch** the same way regardless?"
+
 > **Domain expert:** "Right. The **sync service** calls `exec` to run `git format-patch` and `copyOut` to get the **patch** file back to the **host**."
+
 > **Dev:** "What if I want to add support for OpenCode instead of Claude Code?"
+
 > **Domain expert:** "Create a new **agent provider**. It declares its own **env manifest** — maybe it needs `OPEN_CODE_TOKEN` instead of `CLAUDE_CODE_OAUTH_TOKEN`. Its **env check** validates those requirements. And it provides its own Dockerfile template that installs the right binary."
+
 > **Dev:** "How does Sandcastle know which **agent provider** to use?"
+
 > **Domain expert:** "The `agent` field in `config.json`, or the `--agent` CLI flag. The **env resolver** loads all env vars generically — it doesn't know or care which **agent** is running. The **agent provider**'s **env check** is what enforces the tool-specific requirements."
 
 ## Flagged ambiguities

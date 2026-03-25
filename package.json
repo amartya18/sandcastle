@@ -18,7 +18,7 @@
     "build": "tsgo --project tsconfig.build.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "tsgo --noEmit",
+    "typecheck": "tsgo --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky",
