@@ -124,6 +124,22 @@ describe("readConfig", () => {
     expect(config.agent).toBeUndefined();
   });
 
+  it("reads imageName from config", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "config-test-"));
+    await setupConfigDir(repoDir, { imageName: "myapp:sandbox" });
+
+    const config = await Effect.runPromise(readConfig(repoDir));
+    expect(config.imageName).toBe("myapp:sandbox");
+  });
+
+  it("returns undefined for imageName when not set", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "config-test-"));
+    await setupConfigDir(repoDir, {});
+
+    const config = await Effect.runPromise(readConfig(repoDir));
+    expect(config.imageName).toBeUndefined();
+  });
+
   it("accepts valid hooks config", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "config-test-"));
     await setupConfigDir(repoDir, {

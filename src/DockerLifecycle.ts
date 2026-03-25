@@ -26,14 +26,30 @@ const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
   });
 
 /**
- * Build the sandcastle Docker image from a Dockerfile directory.
+ * Build the sandcastle Docker image.
+ *
+ * When `dockerfile` is provided, uses `docker build -f <dockerfile> <cwd>`
+ * so COPY instructions resolve relative to the current working directory.
+ * Otherwise, uses `docker build <dockerfileDir>` (the default .sandcastle/ directory).
  */
 export const buildImage = (
   imageName: string,
   dockerfileDir: string,
+  options?: { readonly dockerfile?: string },
 ): Effect.Effect<void, DockerError> =>
   Effect.gen(function* () {
-    yield* dockerExec(["build", "-t", imageName, resolve(dockerfileDir)]);
+    if (options?.dockerfile) {
+      yield* dockerExec([
+        "build",
+        "-t",
+        imageName,
+        "-f",
+        resolve(options.dockerfile),
+        process.cwd(),
+      ]);
+    } else {
+      yield* dockerExec(["build", "-t", imageName, resolve(dockerfileDir)]);
+    }
   });
 
 /**

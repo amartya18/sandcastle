@@ -1,5 +1,6 @@
 import { Command, Options } from "@effect/cli";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
+import * as clack from "@clack/prompts";
 import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -11,7 +12,11 @@ import { scaffold } from "./InitService.js";
 import { run } from "./run.js";
 import { getAgentProvider } from "./AgentProvider.js";
 import { AgentError, ConfigDirError, InitError } from "./errors.js";
-import { DockerSandboxFactory, SandboxFactory } from "./SandboxFactory.js";
+import {
+  DockerSandboxFactory,
+  SandboxConfig,
+  SandboxFactory,
+} from "./SandboxFactory.js";
 import { withSandboxLifecycle } from "./SandboxLifecycle.js";
 import { resolveEnv } from "./EnvResolver.js";
 
@@ -19,8 +24,18 @@ import { resolveEnv } from "./EnvResolver.js";
 
 const imageNameOption = Options.text("image-name").pipe(
   Options.withDescription("Docker image name"),
-  Options.withDefault("sandcastle:local"),
+  Options.optional,
 );
+
+const DEFAULT_IMAGE_NAME = "sandcastle:local";
+
+const resolveImageName = (
+  cliFlag: import("effect").Option.Option<string>,
+  config?: import("./Config.js").SandcastleConfig,
+): string =>
+  cliFlag._tag === "Some"
+    ? cliFlag.value
+    : (config?.imageName ?? DEFAULT_IMAGE_NAME);
 
 const agentOption = Options.text("agent").pipe(
   Options.withDescription("Agent provider to use (e.g. claude-code)"),
@@ -48,10 +63,11 @@ const initCommand = Command.make(
     imageName: imageNameOption,
     agent: agentOption,
   },
-  ({ imageName, agent }) =>
+  ({ imageName: imageNameFlag, agent }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const cwd = process.cwd();
+      const imageName = resolveImageName(imageNameFlag);
 
       // Resolve agent provider: CLI flag > default
       const agentName = agent._tag === "Some" ? agent.value : "claude-code";
@@ -74,34 +90,62 @@ const initCommand = Command.make(
         }),
       );
 
-      // Build image from .sandcastle/ directory
-      const dockerfileDir = join(cwd, CONFIG_DIR);
-      yield* d.spinner(
-        `Building Docker image '${imageName}'...`,
-        buildImage(imageName, dockerfileDir),
+      // Prompt user before building image
+      const shouldBuild = yield* Effect.promise(() =>
+        clack.confirm({
+          message: "Build the default Docker image now?",
+          initialValue: true,
+        }),
       );
 
-      yield* d.status("Init complete! Image built successfully.", "success");
+      if (shouldBuild === true) {
+        const dockerfileDir = join(cwd, CONFIG_DIR);
+        yield* d.spinner(
+          `Building Docker image '${imageName}'...`,
+          buildImage(imageName, dockerfileDir),
+        );
+        yield* d.status("Init complete! Image built successfully.", "success");
+      } else {
+        yield* d.status(
+          "Init complete! Run `sandcastle build-image` to build the Docker image later.",
+          "success",
+        );
+      }
     }),
 );
 
 // --- Build-image command ---
 
+const dockerfileOption = Options.file("dockerfile").pipe(
+  Options.withDescription(
+    "Path to a custom Dockerfile (build context will be the current working directory)",
+  ),
+  Options.optional,
+);
+
 const buildImageCommand = Command.make(
   "build-image",
   {
     imageName: imageNameOption,
+    dockerfile: dockerfileOption,
   },
-  ({ imageName }) =>
+  ({ imageName: imageNameFlag, dockerfile }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const cwd = process.cwd();
       yield* requireConfigDir(cwd);
 
+      const config = yield* readConfig(cwd);
+      const imageName = resolveImageName(imageNameFlag, config);
+
       const dockerfileDir = join(cwd, CONFIG_DIR);
+      const dockerfilePath =
+        dockerfile._tag === "Some" ? dockerfile.value : undefined;
       yield* d.spinner(
         `Building Docker image '${imageName}'...`,
-        buildImage(imageName, dockerfileDir),
+        buildImage(imageName, dockerfileDir, {
+          dockerfile: dockerfilePath,
+        }),
       );
 
       yield* d.status("Build complete!", "success");
@@ -115,9 +159,14 @@ const removeImageCommand = Command.make(
   {
     imageName: imageNameOption,
   },
-  ({ imageName }) =>
+  ({ imageName: imageNameFlag }) =>
     Effect.gen(function* () {
       const d = yield* Display;
+      const cwd = process.cwd();
+
+      const config = yield* readConfig(cwd);
+      const imageName = resolveImageName(imageNameFlag, config);
+
       yield* d.spinner(
         `Removing Docker image '${imageName}'...`,
         removeImage(imageName),
@@ -166,7 +215,15 @@ const runCommand = Command.make(
     model: modelOption,
     agent: agentOption,
   },
-  ({ iterations, imageName, prompt, promptFile, branch, model, agent }) =>
+  ({
+    iterations,
+    imageName: imageNameFlag,
+    prompt,
+    promptFile,
+    branch,
+    model,
+    agent,
+  }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const hostRepoDir = process.cwd();
@@ -182,6 +239,7 @@ const runCommand = Command.make(
       const resolvedBranch = branch._tag === "Some" ? branch.value : undefined;
       const resolvedModel = model._tag === "Some" ? model.value : undefined;
       const resolvedAgent = agent._tag === "Some" ? agent.value : undefined;
+      const resolvedImageName = resolveImageName(imageNameFlag, config);
 
       const result = yield* Effect.tryPromise({
         try: () =>
@@ -195,7 +253,7 @@ const runCommand = Command.make(
             branch: resolvedBranch,
             model: resolvedModel,
             agent: resolvedAgent,
-            _imageName: imageName,
+            imageName: resolvedImageName,
           }),
         catch: (e) =>
           new AgentError({
@@ -299,7 +357,7 @@ const interactiveCommand = Command.make(
     model: modelOption,
     agent: agentOption,
   },
-  ({ imageName, model, agent }) =>
+  ({ imageName: imageNameFlag, model, agent }) =>
     Effect.gen(function* () {
       const hostRepoDir = process.cwd();
       yield* requireConfigDir(hostRepoDir);
@@ -309,6 +367,7 @@ const interactiveCommand = Command.make(
 
       // Resolve agent provider: CLI flag > config > default
       const config = yield* readConfig(hostRepoDir);
+      const imageName = resolveImageName(imageNameFlag, config);
       const agentName =
         agent._tag === "Some" ? agent.value : (config.agent ?? "claude-code");
       const provider = yield* Effect.try({
@@ -341,7 +400,14 @@ const interactiveCommand = Command.make(
       const d = yield* Display;
       yield* d.summary("Sandcastle Interactive", { Image: imageName });
 
-      const factoryLayer = DockerSandboxFactory.layer(imageName, env);
+      const sandboxConfigLayer = Layer.succeed(SandboxConfig, {
+        imageName,
+        env,
+      });
+      const factoryLayer = Layer.provide(
+        DockerSandboxFactory.layer,
+        sandboxConfigLayer,
+      );
 
       yield* interactiveSession({
         hostRepoDir,

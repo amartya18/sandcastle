@@ -4,7 +4,7 @@ import { readConfig } from "./Config.js";
 import { ClackDisplay, Display } from "./Display.js";
 import { orchestrate } from "./Orchestrator.js";
 import { resolvePrompt } from "./PromptResolver.js";
-import { DockerSandboxFactory } from "./SandboxFactory.js";
+import { DockerSandboxFactory, SandboxConfig } from "./SandboxFactory.js";
 import { resolveEnv } from "./EnvResolver.js";
 
 export interface RunOptions {
@@ -25,8 +25,8 @@ export interface RunOptions {
   readonly model?: string;
   /** Agent provider name (default: claude-code) */
   readonly agent?: string;
-  /** @internal */
-  readonly _imageName?: string;
+  /** Docker image name to use for the sandbox (default: sandcastle:local) */
+  readonly imageName?: string;
 }
 
 export interface RunResult {
@@ -45,7 +45,6 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     branch,
     model,
     agent,
-    _imageName = "sandcastle:local",
   } = options;
 
   const hostRepoDir = process.cwd();
@@ -70,11 +69,22 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
   const agentName = agent ?? config.agent ?? "claude-code";
   const provider = getAgentProvider(agentName);
 
+  // Resolve image name: explicit option > config > default
+  const resolvedImageName =
+    options.imageName ?? config.imageName ?? "sandcastle:local";
+
   // Resolve env vars and run agent provider's env check
   const env = await resolveEnv(hostRepoDir);
   provider.envCheck(env);
 
-  const factoryLayer = DockerSandboxFactory.layer(_imageName, env);
+  const sandboxConfigLayer = Layer.succeed(SandboxConfig, {
+    imageName: resolvedImageName,
+    env,
+  });
+  const factoryLayer = Layer.provide(
+    DockerSandboxFactory.layer,
+    sandboxConfigLayer,
+  );
   const runLayer = Layer.merge(factoryLayer, ClackDisplay.layer);
 
   const result = await Effect.runPromise(
@@ -82,7 +92,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
       const d = yield* Display;
       yield* d.intro("sandcastle");
       const rows: Record<string, string> = {
-        Image: _imageName,
+        Image: resolvedImageName,
         Iterations: String(maxIterations),
       };
       if (branch) rows["Branch"] = branch;

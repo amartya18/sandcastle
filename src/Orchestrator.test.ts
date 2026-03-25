@@ -1172,7 +1172,9 @@ describe("Orchestrator Display integration", () => {
     // Spinner for sync-out
     const spinnerEntries = entries.filter((e) => e._tag === "spinner");
     expect(
-      spinnerEntries.some((e) => e.message.includes("Syncing results")),
+      spinnerEntries.some((e) =>
+        e.message.includes("Syncing commits back to host"),
+      ),
     ).toBe(true);
 
     // Usage summary

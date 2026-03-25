@@ -5,6 +5,14 @@ import { startContainer, removeContainer } from "./DockerLifecycle.js";
 import type { DockerError } from "./errors.js";
 import { Sandbox } from "./Sandbox.js";
 
+export class SandboxConfig extends Context.Tag("SandboxConfig")<
+  SandboxConfig,
+  {
+    readonly imageName: string;
+    readonly env: Record<string, string>;
+  }
+>() {}
+
 export class SandboxFactory extends Context.Tag("SandboxFactory")<
   SandboxFactory,
   {
@@ -15,23 +23,25 @@ export class SandboxFactory extends Context.Tag("SandboxFactory")<
 >() {}
 
 export const DockerSandboxFactory = {
-  layer: (
-    imageName: string,
-    env: Record<string, string>,
-  ): Layer.Layer<SandboxFactory> =>
-    Layer.succeed(SandboxFactory, {
-      withSandbox: <A, E, R>(
-        effect: Effect.Effect<A, E, R | Sandbox>,
-      ): Effect.Effect<A, E | DockerError, Exclude<R, Sandbox>> => {
-        const containerName = `sandcastle-${randomUUID()}`;
-        return Effect.acquireUseRelease(
-          startContainer(containerName, imageName, env),
-          () =>
-            effect.pipe(
-              Effect.provide(DockerSandbox.layer(containerName)),
-            ) as Effect.Effect<A, E | DockerError, Exclude<R, Sandbox>>,
-          () => removeContainer(containerName).pipe(Effect.orDie),
-        );
-      },
+  layer: Layer.effect(
+    SandboxFactory,
+    Effect.gen(function* () {
+      const { imageName, env } = yield* SandboxConfig;
+      return {
+        withSandbox: <A, E, R>(
+          effect: Effect.Effect<A, E, R | Sandbox>,
+        ): Effect.Effect<A, E | DockerError, Exclude<R, Sandbox>> => {
+          const containerName = `sandcastle-${randomUUID()}`;
+          return Effect.acquireUseRelease(
+            startContainer(containerName, imageName, env),
+            () =>
+              effect.pipe(
+                Effect.provide(DockerSandbox.layer(containerName)),
+              ) as Effect.Effect<A, E | DockerError, Exclude<R, Sandbox>>,
+            () => removeContainer(containerName).pipe(Effect.orDie),
+          );
+        },
+      };
     }),
+  ),
 };
