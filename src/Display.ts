@@ -1,9 +1,11 @@
 import * as clack from "@clack/prompts";
 import { Context, Effect, Layer, Ref } from "effect";
+import { styleText } from "node:util";
 
 export type Severity = "info" | "success" | "warn" | "error";
 
 export type DisplayEntry =
+  | { readonly _tag: "intro"; readonly title: string }
   | {
       readonly _tag: "status";
       readonly message: string;
@@ -18,6 +20,8 @@ export type DisplayEntry =
   | { readonly _tag: "text"; readonly message: string };
 
 export interface DisplayService {
+  readonly intro: (title: string) => Effect.Effect<void>;
+
   readonly status: (message: string, severity: Severity) => Effect.Effect<void>;
 
   readonly spinner: <A, E, R>(
@@ -41,6 +45,12 @@ export class Display extends Context.Tag("Display")<
 export const SilentDisplay = {
   layer: (ref: Ref.Ref<ReadonlyArray<DisplayEntry>>): Layer.Layer<Display> =>
     Layer.succeed(Display, {
+      intro: (title) =>
+        Ref.update(ref, (entries) => [
+          ...entries,
+          { _tag: "intro" as const, title },
+        ]),
+
       status: (message, severity) =>
         Ref.update(ref, (entries) => [
           ...entries,
@@ -79,6 +89,9 @@ const severityToClack: Record<Severity, (message: string) => void> = {
 
 export const ClackDisplay = {
   layer: Layer.succeed(Display, {
+    intro: (title) =>
+      Effect.sync(() => clack.intro(styleText("inverse", ` ${title} `))),
+
     status: (message, severity) =>
       Effect.sync(() => severityToClack[severity](message)),
 

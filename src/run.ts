@@ -80,6 +80,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
   const result = await Effect.runPromise(
     Effect.gen(function* () {
       const d = yield* Display;
+      yield* d.intro("sandcastle");
       const rows: Record<string, string> = {
         Image: _imageName,
         Iterations: String(maxIterations),
