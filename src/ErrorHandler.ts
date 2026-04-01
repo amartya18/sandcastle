@@ -29,7 +29,7 @@ export const formatErrorMessage = (error: SandboxError): string => {
     case "InitError":
       return `${error.message}`;
     case "TimeoutError":
-      return `Agent idle for ${error.idleTimeoutSeconds} seconds — no output received. Consider increasing the idle timeout with --idle-timeout.`;
+      return error.message;
   }
 };
 

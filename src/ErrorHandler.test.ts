@@ -96,9 +96,13 @@ describe("formatErrorMessage", () => {
     expect(msg).toContain("Unknown template");
   });
 
-  it("TimeoutError includes idleTimeoutSeconds and idle-timeout hint", () => {
+  it("TimeoutError passes through message", () => {
     const msg = formatErrorMessage(
-      new TimeoutError({ message: "exceeded limit", idleTimeoutSeconds: 1200 }),
+      new TimeoutError({
+        message:
+          "Agent idle for 1200 seconds — no output received. Consider increasing the idle timeout with --idle-timeout.",
+        idleTimeoutSeconds: 1200,
+      }),
     );
     expect(msg).toContain("1200");
     expect(msg).toContain("--idle-timeout");
@@ -163,7 +167,11 @@ describe("withFriendlyErrors", () => {
     const entries = await runWithDisplay(
       withFriendlyErrors(
         Effect.fail(
-          new TimeoutError({ message: "timed out", idleTimeoutSeconds: 600 }),
+          new TimeoutError({
+            message:
+              "Agent idle for 600 seconds — no output received. Consider increasing the idle timeout with --idle-timeout.",
+            idleTimeoutSeconds: 600,
+          }),
         ),
       ),
     );
