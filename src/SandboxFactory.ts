@@ -345,26 +345,23 @@ const startSandboxContainer = (
 };
 
 /**
- * Worktree sandbox mode: creates a git worktree and bind-mounts it into the
- * container at SANDBOX_WORKSPACE_DIR. The host's .git directory is also bind-mounted at
- * its original host path so the worktree's .git file pointer resolves correctly.
- *
- * In 'none' mode: bind-mounts the host's working directory directly into the container.
- * No worktree is created, pruned, or cleaned up.
- */
-/**
  * Resolves the git-related volume mounts needed for the Docker container.
  * Handles both normal repos (where .git is a directory) and worktrees
  * (where .git is a file pointing to the parent repo's .git/worktrees/<name>).
  */
-function resolveGitVolumeMounts(gitPath: string): string[] {
+export function resolveGitVolumeMounts(gitPath: string): string[] {
   const stat = statSync(gitPath);
   if (stat.isDirectory()) {
     return [`${gitPath}:${gitPath}`];
   }
   // Worktree: .git is a file with "gitdir: <path>"
   const content = readFileSync(gitPath, "utf-8").trim();
-  const gitdirPath = content.replace(/^gitdir:\s*/, "");
+  const match = content.match(/^gitdir:\s*(.+)$/);
+  if (!match) {
+    // Unrecognized format — fall back to mounting the file as-is
+    return [`${gitPath}:${gitPath}`];
+  }
+  const gitdirPath = match[1]!;
   // gitdirPath is like /path/to/repo/.git/worktrees/<name>
   // Mount both the .git file and the parent .git directory
   const parentGitDir = resolve(gitdirPath, "..", "..");
