@@ -24,7 +24,7 @@ import {
   SandboxFactory,
   SANDBOX_WORKSPACE_DIR,
   makeSandboxLayerFromHandle,
-  resolveGitVolumeMounts,
+  resolveGitMounts,
 } from "./SandboxFactory.js";
 import type {
   SandboxProvider,
@@ -151,17 +151,12 @@ export const createSandbox = async (
 
     const gitPath = join(hostRepoDir, ".git");
     const gitMounts = await Effect.runPromise(
-      resolveGitVolumeMounts(gitPath).pipe(
-        Effect.provide(NodeFileSystem.layer),
-      ),
+      resolveGitMounts(gitPath).pipe(Effect.provide(NodeFileSystem.layer)),
     );
 
     const mounts = [
       { hostPath: worktreePath, sandboxPath: SANDBOX_WORKSPACE_DIR },
-      ...gitMounts.map((m) => {
-        const [hostPath, sandboxPath] = m.split(":");
-        return { hostPath: hostPath!, sandboxPath: sandboxPath! };
-      }),
+      ...gitMounts,
     ];
 
     providerHandle = await options.sandbox.create({

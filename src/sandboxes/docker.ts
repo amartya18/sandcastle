@@ -189,8 +189,10 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
 
 /**
  * Derive the default Docker image name from the repo directory.
+ * Returns `sandcastle:<dir-name>` where dir-name is the last path segment,
+ * lowercased and sanitized for Docker image tag rules.
  */
-const defaultImageName = (repoDir: string): string => {
+export const defaultImageName = (repoDir: string): string => {
   const dirName = repoDir.replace(/\/+$/, "").split("/").pop() ?? "local";
   const sanitized = dirName.toLowerCase().replace(/[^a-z0-9_.-]/g, "-");
   return `sandcastle:${sanitized}`;

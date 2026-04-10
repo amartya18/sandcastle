@@ -146,43 +146,40 @@ const printWorktreePreservedMessage = (
   console.error(`  To clean up: git worktree remove --force ${worktreePath}`);
 };
 
+export interface MountEntry {
+  readonly hostPath: string;
+  readonly sandboxPath: string;
+}
+
 /**
- * Resolves the git-related volume mounts needed for the Docker container.
+ * Resolves the git-related mounts needed for the sandbox.
  * Handles both normal repos (where .git is a directory) and worktrees
  * (where .git is a file pointing to the parent repo's .git/worktrees/<name>).
  */
-export const resolveGitVolumeMounts = (
+export const resolveGitMounts = (
   gitPath: string,
-): Effect.Effect<string[], PlatformError, FileSystem.FileSystem> =>
+): Effect.Effect<MountEntry[], PlatformError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const stat = yield* fs.stat(gitPath);
     if (stat.type === "Directory") {
-      return [`${gitPath}:${gitPath}`];
+      return [{ hostPath: gitPath, sandboxPath: gitPath }];
     }
     // Worktree: .git is a file with "gitdir: <path>"
     const content = (yield* fs.readFileString(gitPath)).trim();
     const match = content.match(/^gitdir:\s*(.+)$/);
     if (!match) {
       // Unrecognized format — fall back to mounting the file as-is
-      return [`${gitPath}:${gitPath}`];
+      return [{ hostPath: gitPath, sandboxPath: gitPath }];
     }
     const gitdirPath = match[1]!;
     // gitdirPath is like /path/to/repo/.git/worktrees/<name>
     // Mount both the .git file and the parent .git directory
     const parentGitDir = resolve(gitdirPath, "..", "..");
-    return [`${gitPath}:${gitPath}`, `${parentGitDir}:${parentGitDir}`];
-  });
-
-/**
- * Convert git mount strings ("host:container") into the provider's mounts format.
- */
-const gitMountsToProviderMounts = (
-  gitMountStrings: string[],
-): Array<{ hostPath: string; sandboxPath: string; readonly?: boolean }> =>
-  gitMountStrings.map((m) => {
-    const [hostPath, sandboxPath] = m.split(":");
-    return { hostPath: hostPath!, sandboxPath: sandboxPath! };
+    return [
+      { hostPath: gitPath, sandboxPath: gitPath },
+      { hostPath: parentGitDir, sandboxPath: parentGitDir },
+    ];
   });
 
 /**
@@ -194,7 +191,7 @@ const startProviderSandbox = (
   worktreeOrRepoPath: string,
   hostRepoDir: string,
   env: Record<string, string>,
-  gitMountStrings: string[],
+  gitMounts: MountEntry[],
   workspaceDir: string,
 ): Effect.Effect<
   {
@@ -211,7 +208,7 @@ const startProviderSandbox = (
           hostPath: worktreeOrRepoPath,
           sandboxPath: workspaceDir,
         },
-        ...gitMountsToProviderMounts(gitMountStrings),
+        ...gitMounts,
       ];
       return provider.create({
         worktreePath: worktreeOrRepoPath,
@@ -267,7 +264,7 @@ export const WorktreeDockerSandboxFactory = {
           if (isNoneMode) {
             // None mode: bind-mount host directory directly, no worktree
             const gitPath = join(hostRepoDir, ".git");
-            return resolveGitVolumeMounts(gitPath).pipe(
+            return resolveGitMounts(gitPath).pipe(
               Effect.provideService(FileSystem.FileSystem, fileSystem),
               Effect.mapError(
                 (e) =>
@@ -350,7 +347,7 @@ export const WorktreeDockerSandboxFactory = {
               .pipe(
                 Effect.flatMap((worktreeInfo) => {
                   const gitPath = join(hostRepoDir, ".git");
-                  return resolveGitVolumeMounts(gitPath).pipe(
+                  return resolveGitMounts(gitPath).pipe(
                     Effect.provideService(FileSystem.FileSystem, fileSystem),
                     Effect.mapError(
                       (e) =>

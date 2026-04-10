@@ -15,7 +15,7 @@ import {
   getAgent,
   getNextStepsLines,
 } from "./InitService.js";
-import { defaultImageName } from "./run.js";
+import { defaultImageName } from "./sandboxes/docker.js";
 import {
   claudeCode,
   codex as codexFactory,

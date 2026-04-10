@@ -4,7 +4,6 @@ import {
   buildLogFilename,
   buildRunSummaryRows,
   DEFAULT_MAX_ITERATIONS,
-  defaultImageName,
   printFileDisplayStartup,
   run,
   sanitizeBranchForFilename,
@@ -13,6 +12,7 @@ import {
   type WorktreeMode,
 } from "./run.js";
 import { claudeCode } from "./AgentProvider.js";
+import { defaultImageName } from "./sandboxes/docker.js";
 import { createBindMountSandboxProvider } from "./SandboxProvider.js";
 
 const testSandbox = createBindMountSandboxProvider({
