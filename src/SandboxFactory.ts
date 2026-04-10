@@ -24,6 +24,7 @@ import { copyToSandbox } from "./CopyToSandbox.js";
 import { Display } from "./Display.js";
 import type {
   SandboxProvider,
+  BindMountSandboxProvider,
   BindMountSandboxHandle,
 } from "./SandboxProvider.js";
 
@@ -433,7 +434,7 @@ const gitMountsToProviderMounts = (
  * Returns the handle, sandbox layer, and workspace path.
  */
 const startProviderSandbox = (
-  provider: SandboxProvider,
+  provider: BindMountSandboxProvider,
   worktreeOrRepoPath: string,
   hostRepoDir: string,
   env: Record<string, string>,
@@ -524,7 +525,7 @@ export const WorktreeDockerSandboxFactory = {
                   }) as E | DockerError | WorktreeError,
               ),
               Effect.flatMap((gitMounts) => {
-                if (sandboxProvider) {
+                if (sandboxProvider && sandboxProvider.tag === "bind-mount") {
                   // Provider mode: delegate to the sandbox provider
                   return Effect.acquireUseRelease(
                     startProviderSandbox(
@@ -655,7 +656,10 @@ export const WorktreeDockerSandboxFactory = {
                         DockerError | WorktreeError,
                         never
                       > => {
-                        if (sandboxProvider) {
+                        if (
+                          sandboxProvider &&
+                          sandboxProvider.tag === "bind-mount"
+                        ) {
                           // Provider mode: delegate to the sandbox provider
                           return startProviderSandbox(
                             sandboxProvider,
