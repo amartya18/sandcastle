@@ -19,6 +19,7 @@ import { defaultImageName } from "./sandboxes/docker.js";
 import {
   claudeCode,
   codex as codexFactory,
+  opencode as opencodeFactory,
   pi as piFactory,
   DEFAULT_MODEL,
   type AgentProvider,
@@ -321,6 +322,7 @@ const AGENT_REGISTRY: Record<
   "claude-code": { factory: claudeCode, defaultModel: DEFAULT_MODEL },
   pi: { factory: piFactory, defaultModel: "claude-sonnet-4-6" },
   codex: { factory: codexFactory, defaultModel: "gpt-5.4-mini" },
+  opencode: { factory: opencodeFactory, defaultModel: "opencode/big-pickle" },
 };
 
 const interactiveAgentOption = Options.text("agent").pipe(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeCode, codex, pi } from "./AgentProvider.js";
+import { claudeCode, codex, opencode, pi } from "./AgentProvider.js";
 
 describe("claudeCode factory", () => {
   it("returns a provider with name 'claude-code'", () => {
@@ -444,6 +444,96 @@ describe("codex factory", () => {
 
   it("defaults env to empty object when not provided", () => {
     const provider = codex("gpt-5.4-mini");
+    expect(provider.env).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// opencode factory
+// ---------------------------------------------------------------------------
+
+describe("opencode factory", () => {
+  it("returns a provider with name 'opencode'", () => {
+    const provider = opencode("opencode/big-pickle");
+    expect(provider.name).toBe("opencode");
+  });
+
+  it("does not expose envManifest or dockerfileTemplate", () => {
+    const provider = opencode("opencode/big-pickle");
+    expect(provider).not.toHaveProperty("envManifest");
+    expect(provider).not.toHaveProperty("dockerfileTemplate");
+  });
+
+  it("buildPrintCommand includes the model and prompt", () => {
+    const provider = opencode("opencode/big-pickle");
+    const command = provider.buildPrintCommand("do something");
+    expect(command).toContain("opencode run");
+    expect(command).toContain("opencode/big-pickle");
+  });
+
+  it("buildPrintCommand does not include --format json", () => {
+    const provider = opencode("opencode/big-pickle");
+    const command = provider.buildPrintCommand("do something");
+    expect(command).not.toContain("--format json");
+    expect(command).not.toContain("--format");
+  });
+
+  it("buildPrintCommand shell-escapes the prompt", () => {
+    const provider = opencode("opencode/big-pickle");
+    const command = provider.buildPrintCommand("it's a test");
+    expect(command).toContain("'it'\\''s a test'");
+  });
+
+  it("buildPrintCommand shell-escapes the model", () => {
+    const provider = opencode("opencode/big-pickle");
+    const command = provider.buildPrintCommand("do something");
+    expect(command).toContain("--model 'opencode/big-pickle'");
+  });
+
+  it("buildInteractiveArgs includes the binary and model", () => {
+    const provider = opencode("opencode/big-pickle");
+    const args = provider.buildInteractiveArgs("");
+    expect(args[0]).toBe("opencode");
+    expect(args).toContain("opencode/big-pickle");
+    expect(args).toContain("--model");
+  });
+
+  it("parseStreamLine returns empty array for all input (raw passthrough)", () => {
+    const provider = opencode("opencode/big-pickle");
+    expect(provider.parseStreamLine("some output text")).toEqual([]);
+    expect(provider.parseStreamLine("")).toEqual([]);
+    expect(
+      provider.parseStreamLine(JSON.stringify({ type: "text", text: "hi" })),
+    ).toEqual([]);
+  });
+
+  it("parseStreamLine returns empty array for non-JSON lines", () => {
+    const provider = opencode("opencode/big-pickle");
+    expect(provider.parseStreamLine("not json")).toEqual([]);
+  });
+
+  it("parseStreamLine returns empty array for malformed JSON", () => {
+    const provider = opencode("opencode/big-pickle");
+    expect(provider.parseStreamLine("{bad json")).toEqual([]);
+  });
+
+  it("bakes model into each provider instance independently", () => {
+    const provider1 = opencode("model-a");
+    const provider2 = opencode("model-b");
+    expect(provider1.buildPrintCommand("test")).toContain("model-a");
+    expect(provider2.buildPrintCommand("test")).toContain("model-b");
+    expect(provider1.buildPrintCommand("test")).not.toContain("model-b");
+  });
+
+  it("accepts an env option and exposes it on the provider", () => {
+    const provider = opencode("opencode/big-pickle", {
+      env: { OPENCODE_API_KEY: "sk-test" },
+    });
+    expect(provider.env).toEqual({ OPENCODE_API_KEY: "sk-test" });
+  });
+
+  it("defaults env to empty object when not provided", () => {
+    const provider = opencode("opencode/big-pickle");
     expect(provider.env).toEqual({});
   });
 });

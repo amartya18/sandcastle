@@ -10,12 +10,13 @@ export type {
 } from "./createSandbox.js";
 export type { PromptArgs } from "./PromptArgumentSubstitution.js";
 export type { MountConfig } from "./MountConfig.js";
-export { claudeCode, codex, pi } from "./AgentProvider.js";
+export { claudeCode, codex, opencode, pi } from "./AgentProvider.js";
 export type {
   AgentProvider,
   ClaudeCodeOptions,
-  PiOptions,
   CodexOptions,
+  OpenCodeOptions,
+  PiOptions,
 } from "./AgentProvider.js";
 export {
   createBindMountSandboxProvider,

@@ -218,6 +218,36 @@ export const codex = (
 });
 
 // ---------------------------------------------------------------------------
+// OpenCode agent provider
+// ---------------------------------------------------------------------------
+
+/** Options for the opencode agent provider. */
+export interface OpenCodeOptions {
+  /** Environment variables injected by this agent provider. */
+  readonly env?: Record<string, string>;
+}
+
+export const opencode = (
+  model: string,
+  options?: OpenCodeOptions,
+): AgentProvider => ({
+  name: "opencode",
+  env: options?.env ?? {},
+
+  buildPrintCommand(prompt: string): string {
+    return `opencode run --model ${shellEscape(model)} ${shellEscape(prompt)}`;
+  },
+
+  buildInteractiveArgs(_prompt: string): string[] {
+    return ["opencode", "--model", model];
+  },
+
+  parseStreamLine(_line: string): ParsedStreamEvent[] {
+    return [];
+  },
+});
+
+// ---------------------------------------------------------------------------
 // Claude Code agent provider
 // ---------------------------------------------------------------------------
 
