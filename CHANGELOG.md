@@ -1,5 +1,11 @@
 # @ai-hero/sandcastle
 
+## 0.4.5
+
+### Patch Changes
+
+- e84ffe3: Add a Codex `effort` option that forwards `model_reasoning_effort` to Codex for exec and interactive runs.
+
 ## 0.4.4
 
 ### Patch Changes
