@@ -843,6 +843,259 @@ describe("createSandbox", () => {
     }
   });
 
+  it("sandbox.interactive() invokes interactiveExec and returns result", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const receivedArgs: string[] = [];
+
+    // Create a provider that has interactiveExec
+    const interactiveProvider = createBindMountSandboxProvider({
+      name: "test-interactive",
+      create: async (opts) => ({
+        workspacePath: opts.worktreePath,
+        exec: async (cmd, execOpts) => {
+          const cwd = execOpts?.cwd ?? opts.worktreePath;
+          const result = await execAsync(cmd, { cwd });
+          if (execOpts?.onLine) {
+            for (const line of result.stdout.split("\n")) execOpts.onLine(line);
+          }
+          return {
+            stdout: result.stdout,
+            stderr: result.stderr,
+            exitCode: 0,
+          };
+        },
+        interactiveExec: async (args, _opts) => {
+          receivedArgs.push(...args);
+          return { exitCode: 0 };
+        },
+        close: async () => {},
+      }),
+    });
+
+    const sandbox = await createSandbox({
+      branch: "test-interactive",
+      sandbox: interactiveProvider,
+      _test: { hostRepoDir: hostDir },
+    });
+
+    try {
+      const result = await sandbox.interactive({
+        agent: testProvider,
+        prompt: "do something interactively",
+      });
+
+      expect(result).toHaveProperty("exitCode");
+      expect(result).toHaveProperty("commits");
+      expect(result.exitCode).toBe(0);
+      expect(Array.isArray(result.commits)).toBe(true);
+      // Verify the prompt was passed through buildInteractiveArgs
+      expect(receivedArgs).toContain("do something interactively");
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.interactive() reuses the same sandbox handle", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    let createCallCount = 0;
+
+    const interactiveProvider = createBindMountSandboxProvider({
+      name: "test-interactive-reuse",
+      create: async (opts) => {
+        createCallCount++;
+        return {
+          workspacePath: opts.worktreePath,
+          exec: async (cmd, execOpts) => {
+            const cwd = execOpts?.cwd ?? opts.worktreePath;
+            const result = await execAsync(cmd, { cwd });
+            return {
+              stdout: result.stdout,
+              stderr: result.stderr,
+              exitCode: 0,
+            };
+          },
+          interactiveExec: async () => ({ exitCode: 0 }),
+          close: async () => {},
+        };
+      },
+    });
+
+    const sandbox = await createSandbox({
+      branch: "test-interactive-reuse",
+      sandbox: interactiveProvider,
+      _test: { hostRepoDir: hostDir },
+    });
+
+    try {
+      expect(createCallCount).toBe(1);
+      await sandbox.interactive({
+        agent: testProvider,
+        prompt: "first interactive",
+      });
+      expect(createCallCount).toBe(1);
+      await sandbox.interactive({
+        agent: testProvider,
+        prompt: "second interactive",
+      });
+      expect(createCallCount).toBe(1);
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.interactive() collects commits made during session", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const interactiveProvider = createBindMountSandboxProvider({
+      name: "test-interactive-commits",
+      create: async (opts) => ({
+        workspacePath: opts.worktreePath,
+        exec: async (cmd, execOpts) => {
+          const cwd = execOpts?.cwd ?? opts.worktreePath;
+          const result = await execAsync(cmd, { cwd });
+          return {
+            stdout: result.stdout,
+            stderr: result.stderr,
+            exitCode: 0,
+          };
+        },
+        interactiveExec: async (_args, opts) => {
+          // Simulate agent making a commit
+          const cwd = opts.cwd!;
+          await writeFile(
+            join(cwd, "interactive-file.txt"),
+            "interactive content",
+          );
+          await execAsync("git add interactive-file.txt", { cwd });
+          await execAsync('git commit -m "interactive commit"', { cwd });
+          return { exitCode: 0 };
+        },
+        close: async () => {},
+      }),
+    });
+
+    const sandbox = await createSandbox({
+      branch: "test-interactive-commits",
+      sandbox: interactiveProvider,
+      _test: { hostRepoDir: hostDir },
+    });
+
+    try {
+      const result = await sandbox.interactive({
+        agent: testProvider,
+        prompt: "add a file",
+      });
+
+      expect(result.commits.length).toBeGreaterThanOrEqual(1);
+      expect(result.commits[0]!.sha).toMatch(/^[0-9a-f]{40}$/);
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.interactive() throws when provider lacks interactiveExec", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    // Provider without interactiveExec
+    const noInteractiveProvider = createBindMountSandboxProvider({
+      name: "test-no-interactive",
+      create: async (opts) => ({
+        workspacePath: opts.worktreePath,
+        exec: async (cmd, execOpts) => {
+          const cwd = execOpts?.cwd ?? opts.worktreePath;
+          const result = await execAsync(cmd, { cwd });
+          return {
+            stdout: result.stdout,
+            stderr: result.stderr,
+            exitCode: 0,
+          };
+        },
+        close: async () => {},
+      }),
+    });
+
+    const sandbox = await createSandbox({
+      branch: "test-no-interactive",
+      sandbox: noInteractiveProvider,
+      _test: { hostRepoDir: hostDir },
+    });
+
+    try {
+      await expect(
+        sandbox.interactive({
+          agent: testProvider,
+          prompt: "test",
+        }),
+      ).rejects.toThrow("interactiveExec");
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.interactive() substitutes {{KEY}} placeholders in prompts", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const receivedArgs: string[] = [];
+
+    const interactiveProvider = createBindMountSandboxProvider({
+      name: "test-interactive-args",
+      create: async (opts) => ({
+        workspacePath: opts.worktreePath,
+        exec: async (cmd, execOpts) => {
+          const cwd = execOpts?.cwd ?? opts.worktreePath;
+          const result = await execAsync(cmd, { cwd });
+          return {
+            stdout: result.stdout,
+            stderr: result.stderr,
+            exitCode: 0,
+          };
+        },
+        interactiveExec: async (args, _opts) => {
+          receivedArgs.push(...args);
+          return { exitCode: 0 };
+        },
+        close: async () => {},
+      }),
+    });
+
+    const sandbox = await createSandbox({
+      branch: "test-interactive-args",
+      sandbox: interactiveProvider,
+      _test: { hostRepoDir: hostDir },
+    });
+
+    try {
+      await sandbox.interactive({
+        agent: testProvider,
+        prompt: "Fix bug in {{COMPONENT}}",
+        promptArgs: { COMPONENT: "LoginForm" },
+      });
+
+      const promptArg = receivedArgs[receivedArgs.length - 1]!;
+      expect(promptArg).toContain("LoginForm");
+      expect(promptArg).not.toContain("{{COMPONENT}}");
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("copyToSandbox copies files into the worktree at creation time", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);

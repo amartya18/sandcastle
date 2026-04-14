@@ -18,8 +18,10 @@ import {
   BUILT_IN_PROMPT_ARG_KEYS,
 } from "./PromptArgumentSubstitution.js";
 import { resolvePrompt } from "./PromptResolver.js";
+import { preprocessPrompt } from "./PromptPreprocessor.js";
 import type { LoggingOption } from "./run.js";
 import { buildLogFilename, printFileDisplayStartup } from "./run.js";
+import { withSandboxLifecycle } from "./SandboxLifecycle.js";
 import {
   Sandbox as SandboxTag,
   SandboxFactory,
@@ -95,6 +97,28 @@ export interface SandboxRunResult {
   readonly logFilePath?: string;
 }
 
+export interface SandboxInteractiveOptions {
+  /** Agent provider to use (e.g. claudeCode("claude-opus-4-6")). */
+  readonly agent: AgentProvider;
+  /** Inline prompt string (mutually exclusive with promptFile). */
+  readonly prompt?: string;
+  /** Path to a prompt file (mutually exclusive with prompt). */
+  readonly promptFile?: string;
+  /** Key-value map for {{KEY}} placeholder substitution in prompts. */
+  readonly promptArgs?: PromptArgs;
+  /** Display name for this interactive session. */
+  readonly name?: string;
+  /** Environment variables to inject into the sandbox. */
+  readonly env?: Record<string, string>;
+}
+
+export interface SandboxInteractiveResult {
+  /** List of commits made during the interactive session. */
+  readonly commits: { sha: string }[];
+  /** Exit code of the interactive process. */
+  readonly exitCode: number;
+}
+
 export interface CloseResult {
   /** Host path to the preserved worktree, set when the worktree had uncommitted changes. */
   readonly preservedWorktreePath?: string;
@@ -107,6 +131,10 @@ export interface Sandbox {
   readonly worktreePath: string;
   /** Invoke an agent inside the existing sandbox. */
   run(options: SandboxRunOptions): Promise<SandboxRunResult>;
+  /** Launch an interactive agent session inside the existing sandbox. */
+  interactive(
+    options: SandboxInteractiveOptions,
+  ): Promise<SandboxInteractiveResult>;
   /** Tear down the sandbox and worktree. */
   close(): Promise<CloseResult>;
   /** Auto teardown via `await using`. */
@@ -400,6 +428,107 @@ export const createSandbox = async (
         commits: result.commits,
         logFilePath:
           resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
+      };
+    },
+
+    interactive: async (
+      interactiveOptions: SandboxInteractiveOptions,
+    ): Promise<SandboxInteractiveResult> => {
+      const { agent: provider, prompt, promptFile } = interactiveOptions;
+
+      // Validate buildInteractiveArgs is available
+      if (!provider.buildInteractiveArgs) {
+        throw new Error(
+          `Agent provider "${provider.name}" does not support buildInteractiveArgs, required for interactive sessions.`,
+        );
+      }
+
+      // Validate interactiveExec is available on the handle
+      if (!providerHandle?.interactiveExec) {
+        throw new Error(
+          `Sandbox provider does not support interactiveExec. ` +
+            `The provider must implement the optional interactiveExec method to use interactive().`,
+        );
+      }
+      const interactiveExecFn =
+        providerHandle.interactiveExec.bind(providerHandle);
+
+      // Resolve prompt
+      const rawPrompt = await Effect.runPromise(
+        resolvePrompt({ prompt, promptFile }).pipe(
+          Effect.provide(NodeContext.layer),
+        ),
+      );
+
+      // Resolve prompt arguments
+      const userArgs = interactiveOptions.promptArgs ?? {};
+      const currentHostBranch = await Effect.runPromise(
+        WorktreeManager.getCurrentBranch(hostRepoDir),
+      );
+
+      const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+      const silentDisplayLayer = SilentDisplay.layer(displayRef);
+
+      const resolvedPrompt = await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* validateNoBuiltInArgOverride(userArgs);
+          const effectiveArgs = {
+            SOURCE_BRANCH: branch,
+            TARGET_BRANCH: currentHostBranch,
+            ...userArgs,
+          };
+          const builtInArgKeysSet = new Set<string>(BUILT_IN_PROMPT_ARG_KEYS);
+          return yield* substitutePromptArgs(
+            rawPrompt,
+            effectiveArgs,
+            builtInArgKeysSet,
+          );
+        }).pipe(Effect.provide(silentDisplayLayer)),
+      );
+
+      // Run interactive session using withSandboxLifecycle for commit collection
+      const lifecycleEffect = withSandboxLifecycle(
+        {
+          hostRepoDir,
+          sandboxRepoDir: sandboxRepoDir,
+          branch,
+          hostWorktreePath: worktreePath,
+          applyToHost,
+        },
+        (ctx) =>
+          Effect.gen(function* () {
+            // Preprocess prompt (expand !`command` shell expressions inside sandbox)
+            const fullPrompt = yield* preprocessPrompt(
+              resolvedPrompt,
+              ctx.sandbox,
+              ctx.sandboxRepoDir,
+            );
+
+            // Build interactive args and run the session
+            const interactiveArgs = provider.buildInteractiveArgs!(fullPrompt);
+            const result = yield* Effect.promise(() =>
+              interactiveExecFn(interactiveArgs, {
+                stdin: process.stdin,
+                stdout: process.stdout,
+                stderr: process.stderr,
+                cwd: sandboxRepoDir,
+              }),
+            );
+
+            return result.exitCode;
+          }),
+      );
+
+      const lifecycleResult = await Effect.runPromise(
+        lifecycleEffect.pipe(
+          Effect.provide(sandboxLayer),
+          Effect.provide(silentDisplayLayer),
+        ),
+      );
+
+      return {
+        commits: lifecycleResult.commits,
+        exitCode: lifecycleResult.result,
       };
     },
 

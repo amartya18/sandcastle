@@ -8,6 +8,8 @@ export type {
   Sandbox,
   SandboxRunOptions,
   SandboxRunResult,
+  SandboxInteractiveOptions,
+  SandboxInteractiveResult,
   CloseResult,
 } from "./createSandbox.js";
 export type { PromptArgs } from "./PromptArgumentSubstitution.js";
