@@ -241,23 +241,67 @@ export const WorktreeDockerSandboxFactory = {
           E | DockerError | WorktreeError | SyncError,
           Exclude<R, Sandbox>
         > => {
-          // Isolated providers: skip worktree, sync via git bundle
+          // Isolated providers: create worktree, sync via git bundle
           if (sandboxProvider.tag === "isolated") {
+            let preservedIsolatedWorktreePath: string | undefined;
+
             return Effect.acquireUseRelease(
-              startSandbox({
-                provider: sandboxProvider,
-                hostRepoDir,
-                env,
-                copyPaths,
-              }),
+              // Acquire: prune stale worktrees, create worktree, then start sandbox
+              WorktreeManager.pruneStale(hostRepoDir)
+                .pipe(
+                  Effect.catchAll((e) =>
+                    Effect.sync(() => {
+                      console.error(
+                        "[sandcastle] Warning: failed to prune stale worktrees:",
+                        e.message,
+                      );
+                    }),
+                  ),
+                )
+                .pipe(
+                  Effect.andThen(
+                    branch
+                      ? WorktreeManager.create(hostRepoDir, {
+                          branch,
+                          throwOnDuplicateWorktree,
+                        })
+                      : WorktreeManager.create(hostRepoDir, { name }),
+                  ),
+                )
+                .pipe(Effect.provideService(FileSystem.FileSystem, fileSystem))
+                .pipe(
+                  Effect.flatMap((worktreeInfo) =>
+                    startSandbox({
+                      provider: sandboxProvider,
+                      hostRepoDir: worktreeInfo.path,
+                      env,
+                      copyPaths,
+                    }).pipe(
+                      Effect.map(({ handle, sandboxLayer, workspacePath }) => ({
+                        worktreeInfo,
+                        handle,
+                        sandboxLayer,
+                        workspacePath,
+                      })),
+                    ),
+                  ),
+                ),
               // Use
-              ({ sandboxLayer, workspacePath }) =>
-                makeEffect({ sandboxWorkspacePath: workspacePath }).pipe(
-                  Effect.provide(sandboxLayer),
-                ) as Effect.Effect<A, E | DockerError, Exclude<R, Sandbox>>,
-              // Release: sync commits back to host, then close
-              ({ handle }) =>
-                syncOut(hostRepoDir, handle as IsolatedSandboxHandle).pipe(
+              ({ worktreeInfo, sandboxLayer, workspacePath }) =>
+                makeEffect({
+                  hostWorktreePath: worktreeInfo.path,
+                  sandboxWorkspacePath: workspacePath,
+                }).pipe(Effect.provide(sandboxLayer)) as Effect.Effect<
+                  A,
+                  E | DockerError,
+                  Exclude<R, Sandbox>
+                >,
+              // Release: sync commits back to worktree, close handle, then cleanup worktree
+              ({ worktreeInfo, handle }, exit) =>
+                syncOut(
+                  worktreeInfo.path,
+                  handle as IsolatedSandboxHandle,
+                ).pipe(
                   Effect.catchAll((e) =>
                     Effect.sync(() => {
                       console.error(
@@ -271,13 +315,69 @@ export const WorktreeDockerSandboxFactory = {
                       catch: () => undefined,
                     }),
                   ),
+                  Effect.asVoid,
+                  Effect.andThen(
+                    WorktreeManager.hasUncommittedChanges(
+                      worktreeInfo.path,
+                    ).pipe(
+                      Effect.catchAll(() => Effect.succeed(false)),
+                      Effect.flatMap((isDirty) => {
+                        if (isDirty) {
+                          preservedIsolatedWorktreePath = worktreeInfo.path;
+                          printWorktreePreservedMessage(
+                            worktreeInfo.path,
+                            Exit.isSuccess(exit)
+                              ? `Run succeeded but worktree has uncommitted changes at ${worktreeInfo.path}`
+                              : `Worktree preserved at ${worktreeInfo.path}`,
+                          );
+                          return Effect.void;
+                        } else {
+                          if (!Exit.isSuccess(exit)) {
+                            console.error(
+                              `\nWorktree removed (no uncommitted changes)`,
+                            );
+                          }
+                          return WorktreeManager.remove(worktreeInfo.path);
+                        }
+                      }),
+                    ),
+                  ),
                   Effect.orDie,
                 ),
             ).pipe(
               Effect.map((value) => ({
                 value,
-                preservedWorktreePath: undefined,
+                preservedWorktreePath: preservedIsolatedWorktreePath,
               })),
+              Effect.mapError(
+                (e: E | DockerError | WorktreeError | SyncError) => {
+                  const path = preservedIsolatedWorktreePath;
+                  if (path !== undefined) {
+                    if (e instanceof TimeoutError) {
+                      return new TimeoutError({
+                        message: e.message,
+                        idleTimeoutSeconds: e.idleTimeoutSeconds,
+                        preservedWorktreePath: path,
+                      }) as unknown as
+                        | E
+                        | DockerError
+                        | WorktreeError
+                        | SyncError;
+                    }
+                    if (e instanceof AgentError) {
+                      return new AgentError({
+                        message: e.message,
+                        preservedWorktreePath: path,
+                      }) as unknown as
+                        | E
+                        | DockerError
+                        | WorktreeError
+                        | SyncError;
+                    }
+                  }
+                  return e;
+                },
+              ),
             );
           }
 
