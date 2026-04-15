@@ -102,6 +102,20 @@ const initCommand = Command.make(
       const cwd = process.cwd();
       const imageName = resolveImageName(imageNameFlag, cwd);
 
+      // Early validation of CLI flags before interactive prompts
+      const templates = listTemplates();
+      if (template._tag === "Some") {
+        const valid = templates.find((tmpl) => tmpl.name === template.value);
+        if (!valid) {
+          const names = templates.map((tmpl) => tmpl.name).join(", ");
+          yield* Effect.fail(
+            new InitError({
+              message: `Unknown template "${template.value}". Available: ${names}`,
+            }),
+          );
+        }
+      }
+
       // Resolve agent: CLI flag > interactive select
       const agents = listAgents();
       let selectedAgent: AgentEntry;
@@ -166,21 +180,10 @@ const initCommand = Command.make(
         selectedBacklogManager = getBacklogManager(selected as string)!;
       }
 
-      // Resolve template: CLI flag > interactive select
-      const templates = listTemplates();
+      // Resolve template: CLI flag > interactive select (already validated above)
       let selectedTemplate: string;
       if (template._tag === "Some") {
-        const t = template.value;
-        const valid = templates.find((tmpl) => tmpl.name === t);
-        if (!valid) {
-          const names = templates.map((tmpl) => tmpl.name).join(", ");
-          yield* Effect.fail(
-            new InitError({
-              message: `Unknown template "${t}". Available: ${names}`,
-            }),
-          );
-        }
-        selectedTemplate = t;
+        selectedTemplate = template.value;
       } else {
         const selected = yield* Effect.promise(() =>
           clack.select({
