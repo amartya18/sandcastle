@@ -231,98 +231,111 @@ export const interactive = async (
       handle = startResult.handle;
     }
 
-    // Check interactiveExec is available
-    if (!handle.interactiveExec) {
-      throw new Error(
-        `Sandbox provider does not support interactiveExec. ` +
-          `The provider must implement the optional interactiveExec method to use interactive().`,
+    // Run lifecycle with guaranteed cleanup of handle and worktree
+    return yield* Effect.gen(function* () {
+      // Check interactiveExec is available
+      if (!handle.interactiveExec) {
+        throw new Error(
+          `Sandbox provider does not support interactiveExec. ` +
+            `The provider must implement the optional interactiveExec method to use interactive().`,
+        );
+      }
+      const interactiveExecFn = handle.interactiveExec.bind(handle);
+
+      // Build sandbox layer and run withSandboxLifecycle
+      const sandboxLayer = makeSandboxLayerFromHandle(handle);
+      const workspacePath = handle.workspacePath;
+
+      const applyToHost =
+        sandboxProvider.tag === "isolated" && worktreeInfo
+          ? () => syncOut(worktreeInfo!.path, handle as IsolatedSandboxHandle)
+          : () => Effect.void;
+
+      const lifecycleEffect = withSandboxLifecycle(
+        {
+          hostRepoDir,
+          sandboxRepoDir: workspacePath,
+          hooks,
+          branch: lifecycleBranch,
+          hostWorktreePath: isHeadMode ? hostRepoDir : worktreeInfo?.path,
+          applyToHost,
+        },
+        (ctx) =>
+          Effect.gen(function* () {
+            // Preprocess prompt (expand !`command` shell expressions inside sandbox)
+            const fullPrompt = yield* preprocessPrompt(
+              substitutedPrompt,
+              ctx.sandbox,
+              ctx.sandboxRepoDir,
+            );
+
+            // Build interactive args and run the session
+            const interactiveArgs = provider.buildInteractiveArgs!(fullPrompt);
+            const result = yield* Effect.promise(() =>
+              interactiveExecFn(interactiveArgs, {
+                stdin: process.stdin,
+                stdout: process.stdout,
+                stderr: process.stderr,
+                cwd: workspacePath,
+              }),
+            );
+
+            return result.exitCode;
+          }),
       );
-    }
-    const interactiveExecFn = handle.interactiveExec.bind(handle);
 
-    // Build sandbox layer and run withSandboxLifecycle
-    const sandboxLayer = makeSandboxLayerFromHandle(handle);
-    const workspacePath = handle.workspacePath;
+      const lifecycleResult = yield* lifecycleEffect.pipe(
+        Effect.provide(sandboxLayer),
+      );
 
-    const applyToHost =
-      sandboxProvider.tag === "isolated" && worktreeInfo
-        ? () => syncOut(worktreeInfo!.path, handle as IsolatedSandboxHandle)
-        : () => Effect.void;
+      const exitCode = lifecycleResult.result;
 
-    const lifecycleEffect = withSandboxLifecycle(
-      {
-        hostRepoDir,
-        sandboxRepoDir: workspacePath,
-        hooks,
-        branch: lifecycleBranch,
-        hostWorktreePath: isHeadMode ? hostRepoDir : worktreeInfo?.path,
-        applyToHost,
-      },
-      (ctx) =>
-        Effect.gen(function* () {
-          // Preprocess prompt (expand !`command` shell expressions inside sandbox)
-          const fullPrompt = yield* preprocessPrompt(
-            substitutedPrompt,
-            ctx.sandbox,
-            ctx.sandboxRepoDir,
-          );
+      // Check for uncommitted changes (worktree mode only)
+      let preservedWorktreePath: string | undefined;
+      if (worktreeInfo) {
+        const hasUncommitted = yield* WorktreeManager.hasUncommittedChanges(
+          worktreeInfo.path,
+        ).pipe(Effect.catchAll(() => Effect.succeed(false)));
+        if (hasUncommitted) {
+          preservedWorktreePath = worktreeInfo.path;
+        }
+      }
 
-          // Build interactive args and run the session
-          const interactiveArgs = provider.buildInteractiveArgs!(fullPrompt);
-          const result = yield* Effect.promise(() =>
-            interactiveExecFn(interactiveArgs, {
-              stdin: process.stdin,
-              stdout: process.stdout,
-              stderr: process.stderr,
-              cwd: workspacePath,
-            }),
-          );
+      // Clean up worktree if not preserved
+      if (worktreeInfo && !preservedWorktreePath) {
+        yield* WorktreeManager.remove(worktreeInfo.path).pipe(
+          Effect.catchAll(() => Effect.void),
+        );
+      }
 
-          return result.exitCode;
-        }),
-    );
+      // Final summary
+      yield* d.summary("Session Complete", {
+        Commits: String(lifecycleResult.commits.length),
+        Branch: lifecycleResult.branch,
+        "Exit code": String(exitCode),
+        ...(preservedWorktreePath
+          ? { "Preserved worktree": preservedWorktreePath }
+          : {}),
+      });
 
-    const lifecycleResult = yield* lifecycleEffect.pipe(
-      Effect.provide(sandboxLayer),
+      return {
+        commits: lifecycleResult.commits,
+        branch: lifecycleResult.branch,
+        preservedWorktreePath,
+        exitCode,
+      };
+    }).pipe(
+      // On error, always clean up worktree (on success, handled above with preserve check)
+      Effect.tapError(() =>
+        worktreeInfo
+          ? WorktreeManager.remove(worktreeInfo.path).pipe(
+              Effect.catchAll(() => Effect.void),
+            )
+          : Effect.void,
+      ),
+      // Always close sandbox handle
       Effect.ensuring(Effect.promise(() => handle.close().catch(() => {}))),
     );
-
-    const exitCode = lifecycleResult.result;
-
-    // Check for uncommitted changes (worktree mode only)
-    let preservedWorktreePath: string | undefined;
-    if (worktreeInfo) {
-      const hasUncommitted = yield* WorktreeManager.hasUncommittedChanges(
-        worktreeInfo.path,
-      ).pipe(Effect.catchAll(() => Effect.succeed(false)));
-      if (hasUncommitted) {
-        preservedWorktreePath = worktreeInfo.path;
-      }
-    }
-
-    // Clean up worktree if not preserved
-    if (worktreeInfo && !preservedWorktreePath) {
-      yield* WorktreeManager.remove(worktreeInfo.path).pipe(
-        Effect.catchAll(() => Effect.void),
-      );
-    }
-
-    // Final summary
-    yield* d.summary("Session Complete", {
-      Commits: String(lifecycleResult.commits.length),
-      Branch: lifecycleResult.branch,
-      "Exit code": String(exitCode),
-      ...(preservedWorktreePath
-        ? { "Preserved worktree": preservedWorktreePath }
-        : {}),
-    });
-
-    return {
-      commits: lifecycleResult.commits,
-      branch: lifecycleResult.branch,
-      preservedWorktreePath,
-      exitCode,
-    };
   });
 
   return Effect.runPromise(
