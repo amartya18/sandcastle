@@ -513,9 +513,9 @@ describe("interactive()", () => {
     expect(executionOrder).toEqual(["interactive-after-hook"]);
   });
 
-  // --- copyToSandbox tests ---
+  // --- copyToWorkspace tests ---
 
-  it("throws when copyToSandbox used with head strategy", async () => {
+  it("throws when copyToWorkspace used with head strategy", async () => {
     const provider = makeTestProvider(async () => ({ exitCode: 0 }));
 
     await expect(
@@ -524,12 +524,12 @@ describe("interactive()", () => {
         sandbox: provider,
         prompt: "test",
         branchStrategy: { type: "head" },
-        copyToSandbox: ["node_modules"],
+        copyToWorkspace: ["node_modules"],
       }),
-    ).rejects.toThrow("copyToSandbox is not supported with head");
+    ).rejects.toThrow("copyToWorkspace is not supported with head");
   });
 
-  it("copies files to worktree with copyToSandbox", async () => {
+  it("copies files to worktree with copyToWorkspace", async () => {
     // Create a file to copy
     const nodeModulesDir = join(hostDir, "node_modules");
     execSync(`mkdir -p ${nodeModulesDir}`);
@@ -548,7 +548,7 @@ describe("interactive()", () => {
       sandbox: provider,
       prompt: "test",
       branchStrategy: { type: "merge-to-head" },
-      copyToSandbox: ["node_modules"],
+      copyToWorkspace: ["node_modules"],
     });
 
     expect(copiedFileExists).toBe(true);
