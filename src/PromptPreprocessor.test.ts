@@ -135,7 +135,6 @@ describe("PromptPreprocessor", () => {
     const entries = await Effect.runPromise(Ref.get(displayRef));
     const taskLogEntry = entries.find((e) => e._tag === "taskLog");
     expect(taskLogEntry).toBeDefined();
-    expect(taskLogEntry!._tag).toBe("taskLog");
     if (taskLogEntry!._tag !== "taskLog") throw new Error("unreachable");
     // First two messages are the command names (existing behavior)
     expect(taskLogEntry!.messages[0]).toBe("echo hello");
