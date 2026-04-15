@@ -69,8 +69,8 @@ describe("createWorkspace", () => {
   });
 
   it("rejects 'head' branch strategy at the type level", () => {
-    // @ts-expect-error - head strategy should be a compile-time error
     const _options: CreateWorkspaceOptions = {
+      // @ts-expect-error - head strategy should be a compile-time error
       branchStrategy: { type: "head" },
     };
   });
