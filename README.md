@@ -323,9 +323,15 @@ await using ws = await createWorkspace({
 
 console.log(ws.workspacePath); // host path to the worktree
 console.log(ws.branch); // "agent/fix-42"
+
+// Run an interactive session in the workspace (defaults to noSandbox)
+await ws.interactive({
+  agent: claudeCode("claude-opus-4-6"),
+  prompt: "Explore the codebase and understand the bug.",
+});
 ```
 
-`ws.close()` checks for uncommitted changes: if the worktree is dirty, it's preserved on disk; if clean, it's removed. `await using` calls `close()` automatically.
+`ws.close()` checks for uncommitted changes: if the worktree is dirty, it's preserved on disk; if clean, it's removed. `await using` calls `close()` automatically. The workspace persists after `interactive()` completes, so you can hand it to another agent or inspect it.
 
 #### `CreateWorkspaceOptions`
 
@@ -336,12 +342,26 @@ console.log(ws.branch); // "agent/fix-42"
 
 #### `Workspace`
 
-| Property / Method       | Type                         | Description                                |
-| ----------------------- | ---------------------------- | ------------------------------------------ |
-| `branch`                | string                       | The branch the workspace is on             |
-| `workspacePath`         | string                       | Host path to the workspace                 |
-| `close()`               | `() => Promise<CloseResult>` | Clean up the worktree (preserves if dirty) |
-| `[Symbol.asyncDispose]` | `() => Promise<void>`        | Auto cleanup via `await using`             |
+| Property / Method       | Type                                                                   | Description                                       |
+| ----------------------- | ---------------------------------------------------------------------- | ------------------------------------------------- |
+| `branch`                | string                                                                 | The branch the workspace is on                    |
+| `workspacePath`         | string                                                                 | Host path to the workspace                        |
+| `interactive(options)`  | `(options: WorkspaceInteractiveOptions) => Promise<InteractiveResult>` | Run an interactive agent session in the workspace |
+| `close()`               | `() => Promise<CloseResult>`                                           | Clean up the worktree (preserves if dirty)        |
+| `[Symbol.asyncDispose]` | `() => Promise<void>`                                                  | Auto cleanup via `await using`                    |
+
+#### `WorkspaceInteractiveOptions`
+
+| Option       | Type                   | Default       | Description                                          |
+| ------------ | ---------------------- | ------------- | ---------------------------------------------------- |
+| `agent`      | AgentProvider          | —             | **Required.** Agent provider                         |
+| `sandbox`    | AnySandboxProvider     | `noSandbox()` | Sandbox provider (defaults to no sandbox)            |
+| `prompt`     | string                 | —             | Inline prompt (mutually exclusive with `promptFile`) |
+| `promptFile` | string                 | —             | Path to prompt file                                  |
+| `name`       | string                 | —             | Optional session name                                |
+| `hooks`      | SandboxHooks           | —             | Hooks to run during sandbox lifecycle                |
+| `promptArgs` | PromptArgs             | —             | Key-value map for `{{KEY}}` placeholder substitution |
+| `env`        | Record<string, string> | —             | Environment variables to inject into the sandbox     |
 
 ## How it works
 

@@ -17,6 +17,7 @@ export type {
   CreateWorkspaceOptions,
   Workspace,
   WorkspaceBranchStrategy,
+  WorkspaceInteractiveOptions,
 } from "./createWorkspace.js";
 export type { PromptArgs } from "./PromptArgumentSubstitution.js";
 export type { MountConfig } from "./MountConfig.js";
