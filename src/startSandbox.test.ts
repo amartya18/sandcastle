@@ -11,7 +11,7 @@ import {
   type BindMountSandboxHandle,
   type IsolatedSandboxHandle,
 } from "./SandboxProvider.js";
-import { Sandbox, SANDBOX_WORKSPACE_DIR } from "./SandboxFactory.js";
+import { Sandbox, SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { startSandbox } from "./startSandbox.js";
 import { testIsolated } from "./sandboxes/test-isolated.js";
 
@@ -43,7 +43,7 @@ describe("startSandbox", () => {
         create: async (options) => {
           createCalls.push(options);
           return {
-            workspacePath: SANDBOX_WORKSPACE_DIR,
+            worktreePath: SANDBOX_REPO_DIR,
             exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
             close: async () => {},
           };
@@ -58,21 +58,21 @@ describe("startSandbox", () => {
           env: { FOO: "bar" },
           worktreeOrRepoPath: "/worktree",
           gitMounts,
-          workspaceDir: SANDBOX_WORKSPACE_DIR,
+          repoDir: SANDBOX_REPO_DIR,
         }),
       );
 
       expect(createCalls).toHaveLength(1);
       expect(createCalls[0].mounts).toContainEqual({
         hostPath: "/worktree",
-        sandboxPath: SANDBOX_WORKSPACE_DIR,
+        sandboxPath: SANDBOX_REPO_DIR,
       });
       expect(createCalls[0].mounts).toContainEqual({
         hostPath: "/repo/.git",
         sandboxPath: "/repo/.git",
       });
       expect(createCalls[0].env).toEqual({ FOO: "bar" });
-      expect(result.workspacePath).toBe(SANDBOX_WORKSPACE_DIR);
+      expect(result.worktreePath).toBe(SANDBOX_REPO_DIR);
       expect(result.handle).toBeDefined();
       expect(result.sandboxLayer).toBeDefined();
     });
@@ -81,7 +81,7 @@ describe("startSandbox", () => {
       const provider = createBindMountSandboxProvider({
         name: "test",
         create: async () => ({
-          workspacePath: SANDBOX_WORKSPACE_DIR,
+          worktreePath: SANDBOX_REPO_DIR,
           exec: async () => ({ stdout: "hello", stderr: "", exitCode: 0 }),
           close: async () => {},
         }),
@@ -94,7 +94,7 @@ describe("startSandbox", () => {
           env: {},
           worktreeOrRepoPath: "/worktree",
           gitMounts: [],
-          workspaceDir: SANDBOX_WORKSPACE_DIR,
+          repoDir: SANDBOX_REPO_DIR,
         }),
       );
 
@@ -126,7 +126,7 @@ describe("startSandbox", () => {
       await commitFile(hostDir, "hello.txt", "hello world", "initial");
 
       const provider = testIsolated();
-      const { handle, sandboxLayer, workspacePath } = await Effect.runPromise(
+      const { handle, sandboxLayer, worktreePath } = await Effect.runPromise(
         startSandbox({
           provider,
           hostRepoDir: hostDir,
@@ -143,7 +143,7 @@ describe("startSandbox", () => {
       );
 
       expect(result.stdout.trim()).toBe("hello world");
-      expect(workspacePath).toBeDefined();
+      expect(worktreePath).toBeDefined();
       await handle.close();
     });
 

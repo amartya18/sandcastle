@@ -29,7 +29,7 @@ export interface StartSandboxBindMountOptions {
   env: Record<string, string>;
   worktreeOrRepoPath: string;
   gitMounts: MountEntry[];
-  workspaceDir: string;
+  repoDir: string;
   copyPaths?: undefined;
 }
 
@@ -39,7 +39,7 @@ export interface StartSandboxIsolatedOptions {
   env: Record<string, string>;
   worktreeOrRepoPath?: undefined;
   gitMounts?: undefined;
-  workspaceDir?: undefined;
+  repoDir?: undefined;
   copyPaths?: string[];
 }
 
@@ -50,7 +50,7 @@ export type StartSandboxOptions =
 export interface StartSandboxResult {
   handle: BindMountSandboxHandle | IsolatedSandboxHandle;
   sandboxLayer: Layer.Layer<Sandbox>;
-  workspacePath: string;
+  worktreePath: string;
 }
 
 const CONTAINER_START_TIMEOUT_MS = 120_000;
@@ -63,7 +63,7 @@ const SYNC_IN_TIMEOUT_MS = 120_000;
  * - `"isolated"`: creates handle, syncs host repo via git bundle, then copies
  *   optional `copyPaths` via `handle.copyIn()`.
  *
- * Returns the handle, a `SandboxService` layer, and the workspace path.
+ * Returns the handle, a `SandboxService` layer, and the worktree path.
  */
 export const startSandbox = (
   options: StartSandboxOptions,
@@ -92,12 +92,12 @@ const startBindMountSandbox = (
       const mounts = [
         {
           hostPath: options.worktreeOrRepoPath,
-          sandboxPath: options.workspaceDir,
+          sandboxPath: options.repoDir,
         },
         ...options.gitMounts,
       ];
       return options.provider.create({
-        workspacePath: options.worktreeOrRepoPath,
+        worktreePath: options.worktreeOrRepoPath,
         hostRepoPath: options.hostRepoDir,
         mounts,
         env: options.env,
@@ -111,7 +111,7 @@ const startBindMountSandbox = (
     Effect.map((handle) => ({
       handle,
       sandboxLayer: makeSandboxLayerFromHandle(handle),
-      workspacePath: handle.workspacePath,
+      worktreePath: handle.worktreePath,
     })),
     withTimeout(
       CONTAINER_START_TIMEOUT_MS,
@@ -168,7 +168,7 @@ const startIsolatedSandbox = (
         if (!existsSync(hostPath)) {
           continue;
         }
-        const sandboxPath = join(handle.workspacePath, relativePath);
+        const sandboxPath = join(handle.worktreePath, relativePath);
         yield* Effect.tryPromise({
           try: () => handle.copyIn(hostPath, sandboxPath),
           catch: (e) =>
@@ -182,6 +182,6 @@ const startIsolatedSandbox = (
     return {
       handle,
       sandboxLayer: makeSandboxLayerFromHandle(handle),
-      workspacePath: handle.workspacePath,
+      worktreePath: handle.worktreePath,
     };
   });
