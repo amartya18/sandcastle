@@ -1,5 +1,21 @@
 # @ai-hero/sandcastle
 
+## 0.5.0
+
+### Minor Changes
+
+- 800e743: Restructure hooks API to group by execution location (`host` vs `sandbox`). The old flat `hooks: { onSandboxReady }` shape is replaced with `hooks: { host?: { onWorktreeReady?, onSandboxReady? }, sandbox?: { onSandboxReady? } }`. Host hooks run on the developer's machine; sandbox hooks run inside the container. Breaking change (pre-1.0).
+
+### Patch Changes
+
+- 4515aa9: Add `copyFileIn` and `copyFileOut` methods to `BindMountSandboxHandle` for moving individual files between the host and the sandbox. Docker uses `docker cp`, Podman uses `podman cp`, and the new `testBindMount()` provider uses a plain filesystem copy.
+- 3aa9d9a: Fix Podman sandbox failing on macOS when host UID differs from 1000 by chowning /home/agent to the host UID:GID after container start, matching Docker provider behavior.
+- 0a84413: **Breaking:** Replace `RunResult.iterationsRun` with `RunResult.iterations: IterationResult[]`. Each `IterationResult` carries an optional `sessionId` extracted from Claude Code's stream-json init line. Consumers needing the iteration count should read `iterations.length`. Non-Claude agent providers produce `sessionId: undefined`. The same change applies to `OrchestrateResult`, `SandboxRunResult`, and `WorktreeRunResult`.
+- 85eb071: Add session capture and resume for Claude Code:
+  - **Capture:** after each iteration, the agent's session is saved to the host at `~/.claude/projects/<encoded>/sessions/<id>.jsonl` so it can be replayed or inspected locally with Claude Code's usual tooling. Adds `captureSessions` option to `claudeCode()` (default `true`) and `sessionFilePath` to `IterationResult`.
+  - **Resume:** adds `resumeSession` option to `run()` for continuing a prior Claude Code conversation in a new sandbox run. Incompatible with `maxIterations > 1`.
+  - Exposes the underlying `SessionStore` interface and `transferSession` helper for users who want to move sessions between the host and a sandbox directly.
+
 ## 0.4.8
 
 ### Patch Changes
