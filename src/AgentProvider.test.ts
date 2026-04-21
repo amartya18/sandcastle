@@ -176,6 +176,25 @@ describe("claudeCode factory", () => {
     expect(provider.parseStreamLine(line)).toEqual([]);
   });
 
+  it("buildPrintCommand includes --resume when resumeSession is set", () => {
+    const provider = claudeCode("claude-opus-4-6");
+    const command = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+    });
+    expect(command).toContain("--resume 'abc-123'");
+  });
+
+  it("buildPrintCommand omits --resume when resumeSession is not set", () => {
+    const provider = claudeCode("claude-opus-4-6");
+    const command = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).not.toContain("--resume");
+  });
+
   it("buildPrintCommand omits --dangerously-skip-permissions when false", () => {
     const provider = claudeCode("claude-opus-4-6");
     const command = provider.buildPrintCommand({
@@ -596,6 +615,41 @@ describe("opencode factory", () => {
   it("defaults env to empty object when not provided", () => {
     const provider = opencode("opencode/big-pickle");
     expect(provider.env).toEqual({});
+  });
+});
+
+describe("resumeSession on non-Claude providers", () => {
+  it("pi ignores resumeSession in buildPrintCommand", () => {
+    const provider = pi("claude-sonnet-4-6");
+    const command = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+    });
+    expect(command).not.toContain("--resume");
+    expect(command).not.toContain("abc-123");
+  });
+
+  it("codex ignores resumeSession in buildPrintCommand", () => {
+    const provider = codex("gpt-5.4-mini");
+    const command = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+    });
+    expect(command).not.toContain("--resume");
+    expect(command).not.toContain("abc-123");
+  });
+
+  it("opencode ignores resumeSession in buildPrintCommand", () => {
+    const provider = opencode("opencode/big-pickle");
+    const command = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+    });
+    expect(command).not.toContain("--resume");
+    expect(command).not.toContain("abc-123");
   });
 });
 

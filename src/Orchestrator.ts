@@ -33,6 +33,7 @@ const invokeAgent = (
   onToolCall: (name: string, formattedArgs: string) => void,
   onIdleWarning: (minutes: number) => void,
   idleWarningIntervalMs: number = IDLE_WARNING_INTERVAL_MS,
+  resumeSession?: string,
 ): Effect.Effect<{ result: string; sessionId?: string }, SandboxError> =>
   Effect.gen(function* () {
     let resultText = "";
@@ -79,6 +80,7 @@ const invokeAgent = (
         provider.buildPrintCommand({
           prompt,
           dangerouslySkipPermissions: true,
+          resumeSession,
         }),
         {
           onLine: (line) => {
@@ -145,6 +147,8 @@ export interface OrchestrateOptions {
   readonly _idleWarningIntervalMs?: number;
   /** @internal Override for the host projects directory (for testing). */
   readonly _hostProjectsDir?: string;
+  /** Resume a prior Claude Code session by ID. Applied to iteration 1 only. */
+  readonly resumeSession?: string;
 }
 
 /** Per-iteration result carrying an optional session ID. */
@@ -211,6 +215,37 @@ export const orchestrate = (
             },
             (ctx) =>
               Effect.gen(function* () {
+                // Resume session: transfer JSONL from host to sandbox before iteration 1
+                const iterationResumeSession =
+                  i === 1 ? options.resumeSession : undefined;
+                if (iterationResumeSession && bindMountHandle) {
+                  yield* display.status(label("Resuming session"), "info");
+                  const sandboxCwd = ctx.sandboxRepoDir;
+                  const sandboxProjectsDir = join(
+                    "/home/agent",
+                    ".claude",
+                    "projects",
+                  );
+                  const sbStore = sandboxSessionStore(
+                    sandboxCwd,
+                    bindMountHandle,
+                    sandboxProjectsDir,
+                  );
+                  const hStore = hostSessionStore(
+                    hostRepoDir,
+                    options._hostProjectsDir,
+                  );
+                  yield* Effect.tryPromise({
+                    try: () =>
+                      transferSession(hStore, sbStore, iterationResumeSession),
+                    catch: (e) =>
+                      new SessionCaptureError({
+                        message: `Session resume failed: ${e instanceof Error ? e.message : String(e)}`,
+                        sessionId: iterationResumeSession,
+                      }),
+                  });
+                }
+
                 // Preprocess prompt (run !`command` expressions inside sandbox)
                 const fullPrompt = yield* preprocessPrompt(
                   prompt,
@@ -249,6 +284,7 @@ export const orchestrate = (
                   onToolCall,
                   onIdleWarning,
                   options._idleWarningIntervalMs,
+                  iterationResumeSession,
                 );
 
                 // Flush any remaining buffered text deltas

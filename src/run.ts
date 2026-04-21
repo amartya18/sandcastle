@@ -1,4 +1,5 @@
 import { NodeContext, NodeFileSystem } from "@effect/platform-node";
+import { existsSync } from "node:fs";
 import path, { join } from "node:path";
 import { styleText } from "node:util";
 import { Effect, Layer } from "effect";
@@ -21,6 +22,7 @@ import { formatErrorMessage } from "./ErrorHandler.js";
 import type { SandboxError } from "./errors.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
+import { hostSessionStore } from "./SessionStore.js";
 import { generateTempBranchName, getCurrentBranch } from "./WorktreeManager.js";
 import {
   type PromptArgs,
@@ -163,6 +165,8 @@ export interface RunOptions {
   readonly branchStrategy?: BranchStrategy;
   /** When false, reuse an existing worktree for the target branch instead of failing on collision. Default: true. */
   readonly throwOnDuplicateWorktree?: boolean;
+  /** Resume a prior Claude Code session by ID. The session JSONL must exist on the host. Incompatible with maxIterations > 1. */
+  readonly resumeSession?: string;
 }
 
 export type { IterationResult } from "./Orchestrator.js";
@@ -220,11 +224,30 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     );
   }
 
+  // Validate: resumeSession + maxIterations > 1 is not allowed
+  if (options.resumeSession && maxIterations > 1) {
+    throw new Error(
+      "resumeSession cannot be combined with maxIterations > 1. " +
+        "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
+    );
+  }
+
   // Extract explicit branch when in branch mode
   const branch: string | undefined =
     branchStrategy.type === "branch" ? branchStrategy.branch : undefined;
 
   const hostRepoDir = process.cwd();
+
+  // Validate: resumeSession file must exist on the host
+  if (options.resumeSession) {
+    const hStore = hostSessionStore(hostRepoDir);
+    const sessionPath = hStore.sessionFilePath(options.resumeSession);
+    if (!existsSync(sessionPath)) {
+      throw new Error(
+        `resumeSession "${options.resumeSession}" not found: expected session file at ${sessionPath}`,
+      );
+    }
+  }
 
   // Resolve prompt
   const rawPrompt = await Effect.runPromise(
@@ -354,6 +377,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
       completionSignal: options.completionSignal,
       idleTimeoutSeconds: options.idleTimeoutSeconds,
       name: options.name,
+      resumeSession: options.resumeSession,
     });
 
     const completion = buildCompletionMessage(

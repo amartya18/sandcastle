@@ -74,6 +74,8 @@ const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
 export interface AgentCommandOptions {
   readonly prompt: string;
   readonly dangerouslySkipPermissions: boolean;
+  /** When set, the agent should resume the given session ID instead of starting fresh. */
+  readonly resumeSession?: string;
 }
 
 export interface AgentProvider {
@@ -299,12 +301,16 @@ export const claudeCode = (
   buildPrintCommand({
     prompt,
     dangerouslySkipPermissions,
+    resumeSession,
   }: AgentCommandOptions): string {
     const skipPerms = dangerouslySkipPermissions
       ? " --dangerously-skip-permissions"
       : "";
     const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
-    return `claude --print --verbose${skipPerms} --output-format stream-json --model ${shellEscape(model)}${effortFlag} -p ${shellEscape(prompt)}`;
+    const resumeFlag = resumeSession
+      ? ` --resume ${shellEscape(resumeSession)}`
+      : "";
+    return `claude --print --verbose${skipPerms} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag} -p ${shellEscape(prompt)}`;
   },
 
   buildInteractiveArgs({

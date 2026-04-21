@@ -641,6 +641,7 @@ Removes the Podman image.
 | `completionSignal`         | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early                                                                                |
 | `idleTimeoutSeconds`       | number             | `600`                         | Idle timeout in seconds — resets on each agent output event                                                                                                |
 | `throwOnDuplicateWorktree` | boolean            | `true`                        | When `false`, reuse an existing worktree for the target branch instead of failing on collision                                                             |
+| `resumeSession`            | string             | —                             | Resume a prior Claude Code session by ID. Incompatible with `maxIterations > 1`. Session file must exist on host.                                          |
 
 ### `RunResult`
 
@@ -665,6 +666,28 @@ Removes the Podman image.
 After each Claude Code iteration, Sandcastle automatically captures the agent's session JSONL from the sandbox to the host at `~/.claude/projects/<encoded-path>/sessions/<session-id>.jsonl`. The `cwd` fields inside each JSONL entry are rewritten to match the host repo root, so `claude --resume` works natively.
 
 Session capture is enabled by default for `claudeCode()` and can be opted out via `captureSessions: false`. Non-Claude agent providers never attempt capture. Capture failure fails the run.
+
+### Session resume
+
+Pass `resumeSession` to `run()` to continue a prior Claude Code conversation inside a new sandbox:
+
+```typescript
+const result = await run({
+  agent: claudeCode("claude-opus-4-6"),
+  sandbox: docker(),
+  prompt: "Continue where you left off",
+  resumeSession: "abc-123-def",
+});
+```
+
+Before the sandbox starts, Sandcastle validates that the session file exists on the host and transfers it into the sandbox with `cwd` fields rewritten to match the sandbox-side path. The Claude Code agent receives `--resume <id>` on its print command for iteration 1.
+
+Constraints:
+
+- `resumeSession` is incompatible with `maxIterations > 1` (throws before sandbox creation).
+- The session file must exist at `~/.claude/projects/<encoded-path>/sessions/<id>.jsonl` (throws before sandbox creation).
+- Only iteration 1 receives the resume flag; subsequent iterations (if any) start fresh.
+- Non-Claude agent providers ignore `resumeSession`.
 
 ### `ClaudeCodeOptions`
 

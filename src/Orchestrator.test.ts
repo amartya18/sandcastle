@@ -2981,4 +2981,95 @@ describe("Session capture integration", () => {
     expect(result.iterations[0]!.sessionId).toBeUndefined();
     expect(result.iterations[0]!.sessionFilePath).toBeUndefined();
   });
+
+  it("resumes a session: transfers JSONL to sandbox and passes --resume to agent", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-resume-host-"));
+    const hostProjectsDir = await mkdtemp(
+      join(tmpdir(), "orch-resume-projects-"),
+    );
+    const mockSessionId = "resume-session-xyz";
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    // Write a session JSONL on the host (simulating a prior capture)
+    const encoded = encodeProjectPath(hostDir);
+    const hostSessionsDir = join(hostProjectsDir, encoded, "sessions");
+    await mkdir(hostSessionsDir, { recursive: true });
+    await writeFile(
+      join(hostSessionsDir, `${mockSessionId}.jsonl`),
+      [
+        JSON.stringify({ type: "system", cwd: hostDir }),
+        JSON.stringify({ type: "message", cwd: hostDir, text: "prior work" }),
+      ].join("\n"),
+    );
+
+    const { factoryLayer } = makeSessionCaptureFactory(
+      hostDir,
+      async (repoDir) => {
+        // Verify that the session JSONL was transferred into the sandbox
+        const sbEncoded = encodeProjectPath(repoDir);
+        const sbSessionPath = join(
+          "/home/agent",
+          ".claude",
+          "projects",
+          sbEncoded,
+          "sessions",
+          `${mockSessionId}.jsonl`,
+        );
+        const content = await readFile(sbSessionPath, "utf-8");
+        const lines = content.split("\n");
+        // Verify cwd was rewritten from host to sandbox
+        const firstEntry = JSON.parse(lines[0]!) as { cwd: string };
+        expect(firstEntry.cwd).toBe(repoDir);
+
+        // Also write the new session file the agent would produce
+        const sessionsDir = join(
+          "/home/agent",
+          ".claude",
+          "projects",
+          sbEncoded,
+          "sessions",
+        );
+        await mkdir(sessionsDir, { recursive: true });
+        await writeFile(
+          join(sessionsDir, `${mockSessionId}.jsonl`),
+          [
+            JSON.stringify({ type: "system", cwd: repoDir }),
+            JSON.stringify({
+              type: "message",
+              cwd: repoDir,
+              text: "continued work",
+            }),
+          ].join("\n"),
+        );
+
+        return "Done. <promise>COMPLETE</promise>";
+      },
+      mockSessionId,
+    );
+
+    const result = await Effect.runPromise(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "continue working",
+        _hostProjectsDir: hostProjectsDir,
+        resumeSession: mockSessionId,
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    // Verify iteration result
+    expect(result.iterations.length).toBe(1);
+    expect(result.iterations[0]!.sessionId).toBe(mockSessionId);
+    expect(result.iterations[0]!.sessionFilePath).toBeDefined();
+
+    // Verify the captured file on host has rewritten cwd
+    const capturedPath = result.iterations[0]!.sessionFilePath!;
+    const capturedContent = await readFile(capturedPath, "utf-8");
+    const capturedLines = capturedContent.split("\n");
+    const entry = JSON.parse(capturedLines[0]!) as { cwd: string };
+    expect(entry.cwd).toBe(hostDir);
+  });
 });

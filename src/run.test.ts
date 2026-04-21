@@ -294,6 +294,49 @@ describe("RunOptions", () => {
   });
 });
 
+describe("resumeSession validation", () => {
+  it("throws when resumeSession is set with maxIterations > 1", async () => {
+    await expect(
+      run({
+        agent: claudeCode("claude-opus-4-6"),
+        sandbox: testSandbox,
+        prompt: "test",
+        branchStrategy: { type: "head" },
+        resumeSession: "abc-123",
+        maxIterations: 2,
+      }),
+    ).rejects.toThrow(
+      "resumeSession cannot be combined with maxIterations > 1",
+    );
+  });
+
+  it("throws when resumeSession file does not exist on host", async () => {
+    await expect(
+      run({
+        agent: claudeCode("claude-opus-4-6"),
+        sandbox: testSandbox,
+        prompt: "test",
+        branchStrategy: { type: "head" },
+        resumeSession: "nonexistent-session-id",
+      }),
+    ).rejects.toThrow('resumeSession "nonexistent-session-id" not found');
+  });
+
+  it("allows resumeSession with maxIterations = 1 (default)", async () => {
+    // This should fail for a different reason (missing session file),
+    // not the maxIterations validation
+    await expect(
+      run({
+        agent: claudeCode("claude-opus-4-6"),
+        sandbox: testSandbox,
+        prompt: "test",
+        branchStrategy: { type: "head" },
+        resumeSession: "abc-123",
+      }),
+    ).rejects.toThrow('resumeSession "abc-123" not found');
+  });
+});
+
 describe("copyToWorktree with head branch strategy", () => {
   it("throws a runtime error when copyToWorktree is provided with head strategy", async () => {
     await expect(
