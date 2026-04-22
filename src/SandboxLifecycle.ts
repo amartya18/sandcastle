@@ -308,17 +308,11 @@ export const withSandboxLifecycle = <A>(
         );
 
         const allOnSandboxReady = [...sandboxHookEffects, ...hostHookEffects];
-        if (allOnSandboxReady.length > 0) {
-          try {
-            yield* Effect.all(allOnSandboxReady, {
-              concurrency: "unbounded",
-            });
-          } finally {
-            abortCleanup?.();
-          }
-        } else {
-          abortCleanup?.();
-        }
+        yield* (
+          allOnSandboxReady.length > 0
+            ? Effect.all(allOnSandboxReady, { concurrency: "unbounded" })
+            : Effect.void
+        ).pipe(Effect.ensuring(Effect.sync(() => abortCleanup?.())));
       }),
     );
 
