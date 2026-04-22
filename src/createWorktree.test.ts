@@ -9,6 +9,7 @@ import { createWorktree } from "./createWorktree.js";
 import type {
   CreateWorktreeOptions,
   WorktreeRunOptions,
+  WorktreeInteractiveOptions,
   WorktreeCreateSandboxOptions,
 } from "./createWorktree.js";
 import { claudeCode } from "./AgentProvider.js";
@@ -85,6 +86,14 @@ describe("createWorktree", () => {
     const _options: CreateWorktreeOptions = {
       // @ts-expect-error - head strategy should be a compile-time error
       branchStrategy: { type: "head" },
+    };
+  });
+
+  it("does not accept signal option (compile-time check)", () => {
+    const _options: CreateWorktreeOptions = {
+      branchStrategy: { type: "branch", branch: "test" },
+      // @ts-expect-error - signal should not be accepted on createWorktree
+      signal: new AbortController().signal,
     };
   });
 
@@ -381,6 +390,92 @@ describe("worktree.interactive()", () => {
     }
   });
 
+  it("pre-aborted signal rejects immediately without running agent", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-interactive-abort-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    let agentCalled = false;
+    const provider = makeTestProvider(async () => {
+      agentCalled = true;
+      return { exitCode: 0 };
+    });
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "interactive-abort-test" },
+      cwd: hostDir,
+    });
+
+    try {
+      const ac = new AbortController();
+      ac.abort("pre-aborted-interactive");
+
+      await expect(
+        ws.interactive({
+          agent: claudeCode("claude-opus-4-6"),
+          sandbox: provider,
+          prompt: "test prompt",
+          signal: ac.signal,
+        }),
+      ).rejects.toBe("pre-aborted-interactive");
+
+      expect(agentCalled).toBe(false);
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("abort preserves worktree and handle remains usable", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-interactive-abort-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const ac = new AbortController();
+    ac.abort("abort-interactive");
+
+    const provider = makeTestProvider(async () => ({ exitCode: 0 }));
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "interactive-abort-preserve" },
+      cwd: hostDir,
+    });
+
+    try {
+      // First call: aborted
+      await expect(
+        ws.interactive({
+          agent: claudeCode("claude-opus-4-6"),
+          sandbox: provider,
+          prompt: "test",
+          signal: ac.signal,
+        }),
+      ).rejects.toBe("abort-interactive");
+
+      // Worktree preserved
+      expect(existsSync(ws.worktreePath)).toBe(true);
+
+      // Handle still usable
+      const result = await ws.interactive({
+        agent: claudeCode("claude-opus-4-6"),
+        sandbox: provider,
+        prompt: "test again",
+      });
+      expect(result.exitCode).toBe(0);
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("signal option has correct type on WorktreeInteractiveOptions", () => {
+    const _options: WorktreeInteractiveOptions = {
+      agent: claudeCode("claude-opus-4-6"),
+      prompt: "test",
+      signal: new AbortController().signal,
+    };
+  });
+
   it("returns InteractiveResult with commits from the session", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-interactive-"));
     await initRepo(hostDir);
@@ -590,6 +685,128 @@ describe("worktree.run()", () => {
       prompt: "test",
       // @ts-expect-error — sandbox is required
     } satisfies WorktreeRunOptions;
+  });
+
+  it("pre-aborted signal rejects immediately without running agent", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-run-abort-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    let agentCalled = false;
+    const sandbox = makeRunTestProvider(async () => {
+      agentCalled = true;
+      return "should not run";
+    });
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "abort-pre-test" },
+      cwd: hostDir,
+    });
+
+    try {
+      const ac = new AbortController();
+      ac.abort("pre-aborted");
+
+      await expect(
+        ws.run({
+          agent: claudeCode("claude-opus-4-6"),
+          sandbox,
+          prompt: "do something",
+          signal: ac.signal,
+        }),
+      ).rejects.toBe("pre-aborted");
+
+      expect(agentCalled).toBe(false);
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("abort preserves worktree on disk", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-run-abort-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const ac = new AbortController();
+    const sandbox = makeRunTestProvider(async () => {
+      // Abort mid-execution
+      ac.abort("cancel-mid-run");
+      // Return something so the mock doesn't hang
+      return "partial output";
+    });
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "abort-preserve-test" },
+      cwd: hostDir,
+    });
+
+    try {
+      await expect(
+        ws.run({
+          agent: claudeCode("claude-opus-4-6"),
+          sandbox,
+          prompt: "do something",
+          signal: ac.signal,
+        }),
+      ).rejects.toBe("cancel-mid-run");
+
+      // Worktree should still exist after abort
+      expect(existsSync(ws.worktreePath)).toBe(true);
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("handle is still usable after abort", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-run-abort-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const ac = new AbortController();
+    ac.abort("first-abort");
+
+    const sandbox = makeRunTestProvider(async () => "done");
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "abort-reuse-test" },
+      cwd: hostDir,
+    });
+
+    try {
+      // First call: aborted
+      await expect(
+        ws.run({
+          agent: claudeCode("claude-opus-4-6"),
+          sandbox,
+          prompt: "do something",
+          signal: ac.signal,
+        }),
+      ).rejects.toBe("first-abort");
+
+      // Second call: should succeed without signal
+      const result = await ws.run({
+        agent: claudeCode("claude-opus-4-6"),
+        sandbox,
+        prompt: "do something else",
+      });
+
+      expect(result.iterations.length).toBe(1);
+      expect(result.branch).toBe("abort-reuse-test");
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("signal option has the correct type on WorktreeRunOptions", () => {
+    const _options: WorktreeRunOptions = {
+      agent: claudeCode("claude-opus-4-6"),
+      sandbox: testSandbox,
+      prompt: "test",
+      signal: new AbortController().signal,
+    };
   });
 });
 
