@@ -993,4 +993,33 @@ describe("worktree.createSandbox()", () => {
       branch: "should-not-work",
     };
   });
+
+  it("lock file exists after createWorktree and is gone after close", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-lock-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "lock-integration-branch" },
+      cwd: hostDir,
+    });
+
+    try {
+      const worktreeName = ws.worktreePath.split("/").at(-1)!;
+      const lockPath = join(
+        hostDir,
+        ".sandcastle",
+        "locks",
+        `${worktreeName}.lock`,
+      );
+
+      expect(existsSync(lockPath)).toBe(true);
+
+      await ws.close();
+
+      expect(existsSync(lockPath)).toBe(false);
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
 });

@@ -1,6 +1,6 @@
 import { NodeContext, NodeFileSystem } from "@effect/platform-node";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { Effect, Layer } from "effect";
 import { hostSessionStore } from "./SessionStore.js";
 import type { AgentProvider } from "./AgentProvider.js";
@@ -39,6 +39,7 @@ import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
+import { acquire, release } from "./WorktreeLock.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
 import { resolveCwd } from "./resolveCwd.js";
 import {
@@ -216,7 +217,28 @@ export const createWorktree = async (
     yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
       Effect.catchAll(() => Effect.void),
     );
-    const info = yield* WorktreeManager.create(hostRepoDir, { branch, baseBranch });
+    const info = yield* WorktreeManager.create(hostRepoDir, {
+      branch,
+      baseBranch,
+    });
+    // Only acquire the lock for newly-created worktrees. When WorktreeManager
+    // reuses an existing worktree (collision path), the existing handle still
+    // holds the lock — attempting to re-acquire would fail.
+    const lockFilePath = join(
+      hostRepoDir,
+      ".sandcastle",
+      "locks",
+      `${basename(info.path)}.lock`,
+    );
+    if (!existsSync(lockFilePath)) {
+      yield* Effect.promise(() =>
+        acquire(
+          join(hostRepoDir, ".sandcastle", "locks"),
+          basename(info.path),
+          info.branch,
+        ),
+      );
+    }
     if (options.copyToWorktree && options.copyToWorktree.length > 0) {
       yield* copyToWorktree(options.copyToWorktree, hostRepoDir, info.path);
     }
@@ -229,9 +251,14 @@ export const createWorktree = async (
 
   let closed = false;
 
+  const lockDir = join(hostRepoDir, ".sandcastle", "locks");
+  const worktreeName = basename(worktreeInfo.path);
+
   const close = async (): Promise<CloseResult> => {
     if (closed) return { preservedWorktreePath: undefined };
     closed = true;
+
+    await release(lockDir, worktreeName).catch(() => {});
 
     return Effect.gen(function* () {
       const isDirty = yield* WorktreeManager.hasUncommittedChanges(
