@@ -243,9 +243,11 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \\
 
 const BEADS_TOOLS = `# Install system dependencies for Beads
 RUN apt-get update && apt-get install -y \\
+  dpkg-dev \\
   libicu72 \\
   && rm -rf /var/lib/apt/lists/* \\
-  && for lib in /usr/lib/x86_64-linux-gnu/libicu*.so.72; do \\
+  && ARCH_DIR=$(dpkg-architecture -qDEB_HOST_MULTIARCH) \\
+  && for lib in /usr/lib/$ARCH_DIR/libicu*.so.72; do \\
        ln -s "$lib" "\${lib%.72}.74"; \\
      done
 

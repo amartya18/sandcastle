@@ -1118,6 +1118,12 @@ describe("InitService scaffold", () => {
         "corepack enable",
       );
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).not.toContain("gh");
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).not.toContain(
+        "x86_64-linux-gnu",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
+        "dpkg-architecture -qDEB_HOST_MULTIARCH",
+      );
     });
 
     it("getBacklogManager returns undefined for unknown manager", () => {
@@ -1633,6 +1639,8 @@ describe("InitService scaffold", () => {
       expect(dockerfile).toContain("corepack enable");
       expect(dockerfile).not.toContain("GitHub CLI");
       expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
+      expect(dockerfile).not.toContain("x86_64-linux-gnu");
+      expect(dockerfile).toContain("dpkg-architecture -qDEB_HOST_MULTIARCH");
     });
 
     it("scaffold with beads + podman produces Containerfile with beads install", async () => {
@@ -1651,6 +1659,8 @@ describe("InitService scaffold", () => {
       expect(containerfile).toContain("libicu72");
       expect(containerfile).not.toContain("GitHub CLI");
       expect(containerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
+      expect(containerfile).not.toContain("x86_64-linux-gnu");
+      expect(containerfile).toContain("dpkg-architecture -qDEB_HOST_MULTIARCH");
     });
 
     it("scaffold with beads + pi agent produces Dockerfile with beads install and pi agent", async () => {
