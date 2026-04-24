@@ -5,7 +5,7 @@
  * Exports: runForTest, recording agent-invoker layer, identity preprocessor
  * layer, and a recorder accessor.
  */
-import { NodeContext, NodeFileSystem } from "@effect/platform-node";
+import { NodeContext } from "@effect/platform-node";
 import { Effect, Layer, Ref } from "effect";
 import { resolveCwd } from "./resolveCwd.js";
 import type { AgentProvider } from "./AgentProvider.js";
@@ -64,11 +64,6 @@ export const clearRecordedInvocations = (): void => {
 
 const DEFAULT_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
 
-/**
- * A test AgentInvoker that records each invocation and returns the default
- * completion signal after one iteration, causing multi-iteration templates
- * to terminate predictably.
- */
 /**
  * Extract the --model value from the provider's print command.
  */

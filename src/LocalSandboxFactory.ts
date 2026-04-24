@@ -5,10 +5,14 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { SandboxFactory, type WithSandboxResult } from "./SandboxFactory.js";
+import {
+  SandboxFactory,
+  Sandbox,
+  type SandboxInfo,
+  type WithSandboxResult,
+} from "./SandboxFactory.js";
 import type { SandboxError } from "./errors.js";
 import type { BranchStrategy } from "./SandboxProvider.js";
-import { Sandbox } from "./SandboxFactory.js";
 import { makeLocalSandboxLayer } from "./testSandbox.js";
 
 const execAsync = promisify(exec);
@@ -40,7 +44,7 @@ export const makeLocalSandboxFactoryLayer = (
   return Layer.succeed(SandboxFactory, {
     withSandbox: <A, E, R>(
       makeEffect: (
-        info: import("./SandboxFactory.js").SandboxInfo,
+        info: SandboxInfo,
       ) => Effect.Effect<A, E, R | Sandbox>,
     ): Effect.Effect<
       WithSandboxResult<A>,
@@ -106,7 +110,7 @@ export const makeLocalSandboxFactoryLayer = (
           return { sandboxDir, workDir, branch };
         }),
         // Use
-        ({ workDir, branch }) => {
+        ({ workDir }) => {
           const sandboxLayer = makeLocalSandboxLayer(workDir);
           return makeEffect({
             hostWorktreePath: workDir,
