@@ -333,18 +333,19 @@ describe("init-template e2e", () => {
     );
   });
 
+  // Plan data shared by parallel-planner and parallel-planner-with-review
+  // tests — one issue to exercise all phases.
+  const planIssue = {
+    id: "42",
+    title: "Fix auth bug",
+    branch: "sandcastle/issue-42-fix-auth-bug",
+  };
+  const planResponse = [
+    `<plan>${JSON.stringify({ issues: [planIssue] })}</plan>`,
+    "<promise>COMPLETE</promise>",
+  ].join("\n");
+
   describe("parallel-planner template", () => {
-    // Plan data returned by the planner agent — one issue to exercise all
-    // three phases (plan → implement → merge).
-    const planIssue = {
-      id: "42",
-      title: "Fix auth bug",
-      branch: "sandcastle/issue-42-fix-auth-bug",
-    };
-    const planResponse = [
-      `<plan>${JSON.stringify({ issues: [planIssue] })}</plan>`,
-      "<promise>COMPLETE</promise>",
-    ].join("\n");
 
     describe.each(combinations)(
       "agent=$agentName, backlog-manager=$bmName",
@@ -526,6 +527,194 @@ describe("init-template e2e", () => {
           expect(merge.runName).toBe("merger");
 
           // Prompt args: BRANCHES and ISSUES lists
+          expect(merge.promptArgs).toEqual({
+            BRANCHES: expectedBranches,
+            ISSUES: expectedIssues,
+          });
+        });
+      },
+    );
+  });
+
+  describe("parallel-planner-with-review template", () => {
+    describe.each(combinations)(
+      "agent=$agentName, backlog-manager=$bmName",
+      ({ agentName, bmName }) => {
+        it("scaffolds and executes plan→implement→review→merge pipeline", async () => {
+          const agent = getAgent(agentName)!;
+          const backlogManager = getBacklogManager(bmName)!;
+
+          // Scaffold the parallel-planner-with-review template
+          const result = await Effect.runPromise(
+            scaffold(scaffoldDir, {
+              agent,
+              model: agent.defaultModel,
+              templateName: "parallel-planner-with-review",
+              createLabel: true,
+              backlogManager,
+            }).pipe(Effect.provide(NodeFileSystem.layer)),
+          );
+
+          const mainFilePath = join(
+            scaffoldDir,
+            ".sandcastle",
+            result.mainFilename,
+          );
+
+          // Patch MAX_ITERATIONS to 1 so only one plan→execute→review→merge
+          // cycle runs.
+          let mainContent = await readFile(mainFilePath, "utf-8");
+          mainContent = mainContent.replace(
+            /const MAX_ITERATIONS = \d+;/,
+            "const MAX_ITERATIONS = 1;",
+          );
+          await writeFile(mainFilePath, mainContent);
+
+          // Read expected prompts from the scaffolded template files
+          const planPromptPath = join(
+            scaffoldDir,
+            ".sandcastle",
+            "plan-prompt.md",
+          );
+          const implementPromptPath = join(
+            scaffoldDir,
+            ".sandcastle",
+            "implement-prompt.md",
+          );
+          const reviewPromptPath = join(
+            scaffoldDir,
+            ".sandcastle",
+            "review-prompt.md",
+          );
+          const mergePromptPath = join(
+            scaffoldDir,
+            ".sandcastle",
+            "merge-prompt.md",
+          );
+          const expectedPlanPrompt = await readFile(planPromptPath, "utf-8");
+          const expectedImplementPromptRaw = await readFile(
+            implementPromptPath,
+            "utf-8",
+          );
+          const expectedReviewPromptRaw = await readFile(
+            reviewPromptPath,
+            "utf-8",
+          );
+          const expectedMergePromptRaw = await readFile(
+            mergePromptPath,
+            "utf-8",
+          );
+
+          // Assert the prompts contain backlog-manager shell expressions
+          // (pre-expansion, since IdentityPromptPreprocessor is used)
+          const allPromptText = [
+            expectedPlanPrompt,
+            expectedImplementPromptRaw,
+            expectedReviewPromptRaw,
+            expectedMergePromptRaw,
+          ].join("\n");
+          for (const expr of shellExpressionsByBm[bmName]!) {
+            expect(allPromptText).toContain(expr);
+          }
+
+          // Configure the planner to return a valid plan so the template
+          // proceeds through all four phases.
+          setStdoutByRunName({ planner: planResponse });
+
+          // chdir to the scaffold dir so relative prompt file paths resolve
+          process.chdir(scaffoldDir);
+
+          try {
+            await import(mainFilePath);
+          } finally {
+            setStdoutByRunName(undefined);
+          }
+
+          // Assert: 4 recorded invocations (plan + implement + review + merge)
+          const invocations = getRecordedInvocations();
+          expect(invocations).toHaveLength(4);
+
+          // -----------------------------------------------------------
+          // Phase 1: Plan
+          // -----------------------------------------------------------
+          const plan = invocations[0]!;
+
+          expect(plan.agentProvider).toBe(agentName);
+          expect(plan.model).toBe(agent.defaultModel);
+          expect(plan.prompt).toBe(expectedPlanPrompt);
+          expect(plan.branchStrategy).toEqual({ type: "head" });
+          expect(plan.maxIterations).toBe(1);
+          expect(plan.runName).toBe("planner");
+          expect(plan.promptArgs).toEqual({});
+
+          // -----------------------------------------------------------
+          // Phase 2: Implement (one issue from the plan)
+          // -----------------------------------------------------------
+          const implement = invocations[1]!;
+
+          expect(implement.agentProvider).toBe(agentName);
+          expect(implement.model).toBe(agent.defaultModel);
+
+          const expectedImplementPrompt = expectedImplementPromptRaw
+            .replace(/\{\{TASK_ID\}\}/g, planIssue.id)
+            .replace(/\{\{ISSUE_TITLE\}\}/g, planIssue.title)
+            .replace(/\{\{BRANCH\}\}/g, planIssue.branch);
+          expect(implement.prompt).toBe(expectedImplementPrompt);
+
+          expect(implement.branchStrategy).toEqual({
+            type: "branch",
+            branch: planIssue.branch,
+          });
+          expect(implement.maxIterations).toBe(100);
+          expect(implement.runName).toBe("implementer");
+          expect(implement.promptArgs).toEqual({
+            TASK_ID: planIssue.id,
+            ISSUE_TITLE: planIssue.title,
+            BRANCH: planIssue.branch,
+          });
+
+          // -----------------------------------------------------------
+          // Phase 3: Review (runs because implementer produced commits)
+          // -----------------------------------------------------------
+          const review = invocations[2]!;
+
+          expect(review.agentProvider).toBe(agentName);
+          expect(review.model).toBe(agent.defaultModel);
+
+          const expectedReviewPrompt = expectedReviewPromptRaw.replace(
+            /\{\{BRANCH\}\}/g,
+            planIssue.branch,
+          );
+          expect(review.prompt).toBe(expectedReviewPrompt);
+
+          expect(review.branchStrategy).toEqual({
+            type: "branch",
+            branch: planIssue.branch,
+          });
+          expect(review.maxIterations).toBe(1);
+          expect(review.runName).toBe("reviewer");
+          expect(review.promptArgs).toEqual({
+            BRANCH: planIssue.branch,
+          });
+
+          // -----------------------------------------------------------
+          // Phase 4: Merge
+          // -----------------------------------------------------------
+          const merge = invocations[3]!;
+
+          expect(merge.agentProvider).toBe(agentName);
+          expect(merge.model).toBe(agent.defaultModel);
+
+          const expectedBranches = `- ${planIssue.branch}`;
+          const expectedIssues = `- ${planIssue.id}: ${planIssue.title}`;
+          const expectedMergePrompt = expectedMergePromptRaw
+            .replace(/\{\{BRANCHES\}\}/g, expectedBranches)
+            .replace(/\{\{ISSUES\}\}/g, expectedIssues);
+          expect(merge.prompt).toBe(expectedMergePrompt);
+
+          expect(merge.branchStrategy).toEqual({ type: "head" });
+          expect(merge.maxIterations).toBe(1);
+          expect(merge.runName).toBe("merger");
           expect(merge.promptArgs).toEqual({
             BRANCHES: expectedBranches,
             ISSUES: expectedIssues,

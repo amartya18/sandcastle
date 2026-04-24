@@ -29,6 +29,12 @@ import { makeLocalSandboxFactoryLayer } from "./LocalSandboxFactory.js";
 import type { BranchStrategy } from "./SandboxProvider.js";
 import type { RunOptions, RunResult } from "./run.js";
 import { DEFAULT_MAX_ITERATIONS } from "./run.js";
+import type {
+  CreateSandboxOptions,
+  Sandbox,
+  SandboxRunOptions,
+  SandboxRunResult,
+} from "./createSandbox.js";
 
 // -----------------------------------------------------------------------
 // Recorded invocation type
@@ -285,6 +291,56 @@ export const runForTest = async (options: RunOptions): Promise<RunResult> => {
   };
 };
 
+// -----------------------------------------------------------------------
+// Test createSandbox — delegates sandbox.run() calls to runForTest so that
+// templates using createSandbox() record invocations through the same
+// recording agent invoker as top-level run() calls.
+// -----------------------------------------------------------------------
+
+const createSandboxForTest = async (
+  options: CreateSandboxOptions,
+): Promise<Sandbox> => {
+  const branch = options.branch;
+
+  return {
+    branch,
+    worktreePath: process.cwd(),
+
+    async run(runOptions: SandboxRunOptions): Promise<SandboxRunResult> {
+      const result = await runForTest({
+        agent: runOptions.agent,
+        sandbox: undefined as any, // runForTest ignores sandbox
+        prompt: runOptions.prompt,
+        promptFile: runOptions.promptFile,
+        promptArgs: runOptions.promptArgs,
+        maxIterations: runOptions.maxIterations,
+        name: runOptions.name,
+        completionSignal: runOptions.completionSignal,
+        idleTimeoutSeconds: runOptions.idleTimeoutSeconds,
+        signal: runOptions.signal,
+        branchStrategy: { type: "branch", branch },
+      });
+      return {
+        iterations: result.iterations,
+        completionSignal: result.completionSignal,
+        stdout: result.stdout,
+        commits: result.commits,
+        logFilePath: result.logFilePath,
+      };
+    },
+
+    async interactive(): Promise<never> {
+      throw new Error("interactive() not supported in test createSandbox");
+    },
+
+    async close() {
+      return {};
+    },
+
+    async [Symbol.asyncDispose]() {},
+  };
+};
+
 // Re-export everything from index so templates can import from the test alias.
 // IMPORTANT: export runForTest AS run so the generated main.mts uses it unchanged.
 export { runForTest as run };
@@ -297,7 +353,7 @@ export type {
 } from "./run.js";
 export { interactive } from "./interactive.js";
 export type { InteractiveOptions, InteractiveResult } from "./interactive.js";
-export { createSandbox } from "./createSandbox.js";
+export { createSandboxForTest as createSandbox };
 export type {
   CreateSandboxOptions,
   Sandbox,
