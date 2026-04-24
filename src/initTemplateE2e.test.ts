@@ -166,30 +166,18 @@ describe("init-template e2e", () => {
           );
           await import(mainFilePath);
 
-          // Assert: only one recorded invocation (completion signal stops loop)
+          // Only one invocation: completion signal stops the loop on iteration 1
           const invocations = getRecordedInvocations();
           expect(invocations).toHaveLength(1);
 
           const invocation = invocations[0]!;
-
-          // Assert: agent provider matches the --agent choice
           expect(invocation.agentProvider).toBe(agentName);
-
-          // Assert: model matches the agent's defaultModel
           expect(invocation.model).toBe(agent.defaultModel);
-
-          // Assert: recorded prompt matches the scaffolded prompt
           expect(invocation.prompt).toBe(expectedPrompt);
-
-          // Assert: branch strategy from the template (merge-to-head)
           expect(invocation.branchStrategy).toEqual({
             type: "merge-to-head",
           });
-
-          // Assert: maxIterations from the template (3)
           expect(invocation.maxIterations).toBe(3);
-
-          // Assert: only first iteration ran (completion signal on iteration 1)
           expect(invocation.iterationIndex).toBe(1);
         });
       },
@@ -271,62 +259,34 @@ describe("init-template e2e", () => {
           // First invocation: implement phase
           // -----------------------------------------------------------------
           const implement = invocations[0]!;
-
-          // Agent provider matches the --agent choice
           expect(implement.agentProvider).toBe(agentName);
-
-          // Model matches the agent's defaultModel
           expect(implement.model).toBe(agent.defaultModel);
-
-          // Recorded prompt matches the scaffolded implement-prompt.md
           expect(implement.prompt).toBe(expectedImplementPrompt);
-
-          // Branch strategy from the template (merge-to-head)
           expect(implement.branchStrategy).toEqual({
             type: "merge-to-head",
           });
-
-          // maxIterations from the template (100)
           expect(implement.maxIterations).toBe(100);
-
-          // Run name from the template
           expect(implement.runName).toBe("implementer");
-
-          // No user-provided prompt args for the implement phase
           expect(implement.promptArgs).toEqual({});
 
           // -----------------------------------------------------------------
           // Second invocation: review phase
           // -----------------------------------------------------------------
           const review = invocations[1]!;
-
-          // Agent provider matches the --agent choice
           expect(review.agentProvider).toBe(agentName);
-
-          // Model matches the agent's defaultModel
           expect(review.model).toBe(agent.defaultModel);
 
-          // Review prompt has {{BRANCH}} substituted with the branch name.
-          // The implement result branch is "main" (the scaffoldDir's branch).
           const expectedReviewPrompt = expectedReviewPromptRaw.replace(
             /\{\{BRANCH\}\}/g,
             "main",
           );
           expect(review.prompt).toBe(expectedReviewPrompt);
-
-          // Branch strategy: explicit branch targeting the implement branch
           expect(review.branchStrategy).toEqual({
             type: "branch",
             branch: "main",
           });
-
-          // maxIterations from the template (1)
           expect(review.maxIterations).toBe(1);
-
-          // Run name from the template
           expect(review.runName).toBe("reviewer");
-
-          // Prompt args: BRANCH is passed through
           expect(review.promptArgs).toEqual({ BRANCH: "main" });
         });
       },
@@ -346,7 +306,6 @@ describe("init-template e2e", () => {
   ].join("\n");
 
   describe("parallel-planner template", () => {
-
     describe.each(combinations)(
       "agent=$agentName, backlog-manager=$bmName",
       ({ agentName, bmName }) => {
@@ -437,61 +396,32 @@ describe("init-template e2e", () => {
           // Phase 1: Plan
           // -----------------------------------------------------------
           const plan = invocations[0]!;
-
-          // Agent provider matches the --agent choice
           expect(plan.agentProvider).toBe(agentName);
-
-          // Model matches the agent's defaultModel (scaffold rewrites all
-          // factory calls to the same model)
           expect(plan.model).toBe(agent.defaultModel);
-
-          // Recorded prompt matches the scaffolded plan-prompt.md
           expect(plan.prompt).toBe(expectedPlanPrompt);
-
-          // No explicit branchStrategy → default head
           expect(plan.branchStrategy).toEqual({ type: "head" });
-
-          // maxIterations from the template (1)
           expect(plan.maxIterations).toBe(1);
-
-          // Run name from the template
           expect(plan.runName).toBe("planner");
-
-          // No user-provided prompt args for the plan phase
           expect(plan.promptArgs).toEqual({});
 
           // -----------------------------------------------------------
           // Phase 2: Implement (one issue from the plan)
           // -----------------------------------------------------------
           const implement = invocations[1]!;
-
-          // Agent provider matches the --agent choice
           expect(implement.agentProvider).toBe(agentName);
-
-          // Model matches the agent's defaultModel
           expect(implement.model).toBe(agent.defaultModel);
 
-          // Implement prompt has {{TASK_ID}}, {{ISSUE_TITLE}}, {{BRANCH}}
-          // substituted with the plan issue's values.
           const expectedImplementPrompt = expectedImplementPromptRaw
             .replace(/\{\{TASK_ID\}\}/g, planIssue.id)
             .replace(/\{\{ISSUE_TITLE\}\}/g, planIssue.title)
             .replace(/\{\{BRANCH\}\}/g, planIssue.branch);
           expect(implement.prompt).toBe(expectedImplementPrompt);
-
-          // Branch strategy: explicit branch targeting the plan issue's branch
           expect(implement.branchStrategy).toEqual({
             type: "branch",
             branch: planIssue.branch,
           });
-
-          // maxIterations from the template (100)
           expect(implement.maxIterations).toBe(100);
-
-          // Run name from the template
           expect(implement.runName).toBe("implementer");
-
-          // Prompt args: TASK_ID, ISSUE_TITLE, BRANCH from the plan issue
           expect(implement.promptArgs).toEqual({
             TASK_ID: planIssue.id,
             ISSUE_TITLE: planIssue.title,
@@ -502,31 +432,18 @@ describe("init-template e2e", () => {
           // Phase 3: Merge
           // -----------------------------------------------------------
           const merge = invocations[2]!;
-
-          // Agent provider matches the --agent choice
           expect(merge.agentProvider).toBe(agentName);
-
-          // Model matches the agent's defaultModel
           expect(merge.model).toBe(agent.defaultModel);
 
-          // Merge prompt has {{BRANCHES}} and {{ISSUES}} substituted
           const expectedBranches = `- ${planIssue.branch}`;
           const expectedIssues = `- ${planIssue.id}: ${planIssue.title}`;
           const expectedMergePrompt = expectedMergePromptRaw
             .replace(/\{\{BRANCHES\}\}/g, expectedBranches)
             .replace(/\{\{ISSUES\}\}/g, expectedIssues);
           expect(merge.prompt).toBe(expectedMergePrompt);
-
-          // No explicit branchStrategy → default head
           expect(merge.branchStrategy).toEqual({ type: "head" });
-
-          // maxIterations from the template (1)
           expect(merge.maxIterations).toBe(1);
-
-          // Run name from the template
           expect(merge.runName).toBe("merger");
-
-          // Prompt args: BRANCHES and ISSUES lists
           expect(merge.promptArgs).toEqual({
             BRANCHES: expectedBranches,
             ISSUES: expectedIssues,
