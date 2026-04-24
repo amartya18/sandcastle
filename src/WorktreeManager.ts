@@ -1,8 +1,9 @@
 import { Effect, Option } from "effect";
 import { FileSystem } from "@effect/platform";
 import { execFile } from "node:child_process";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { WorktreeError, WorktreeTimeoutError, withTimeout } from "./errors.js";
+import { pruneStale as pruneStaleLocks } from "./WorktreeLock.js";
 
 const WORKTREE_TIMEOUT_MS = 30_000;
 
@@ -185,7 +186,14 @@ export const create = (
         Effect.catchAll((e) => {
           if (e.message.includes("invalid reference")) {
             return execGit(
-              ["worktree", "add", "-b", branch, worktreePath, opts?.baseBranch ?? "HEAD"],
+              [
+                "worktree",
+                "add",
+                "-b",
+                branch,
+                worktreePath,
+                opts?.baseBranch ?? "HEAD",
+              ],
               repoDir,
             );
           }
@@ -318,6 +326,13 @@ export const pruneStale = (
         );
       }
     }
+
+    // Prune stale lock files alongside orphaned directories
+    const lockDir = join(repoDir, ".sandcastle", "locks");
+    const activeWorktreeNames = new Set(
+      [...activeWorktreePaths].map((p) => basename(p)),
+    );
+    yield* Effect.promise(() => pruneStaleLocks(lockDir, activeWorktreeNames));
   }).pipe(
     withTimeout(
       WORKTREE_TIMEOUT_MS,

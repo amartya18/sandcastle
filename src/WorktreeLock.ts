@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
-import { mkdir, open, readFile, rm } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { WorktreeLockError } from "./errors.js";
 
@@ -133,5 +133,53 @@ export const release = async (
       return;
     }
     throw err;
+  }
+};
+
+/**
+ * Removes stale lock files from the lock directory.
+ *
+ * A lock is stale if:
+ * - Its worktree name is not in the active set (orphaned lock), OR
+ * - Its worktree name IS active but the owning PID is dead (crashed process)
+ *
+ * Live locks for active worktrees are preserved.
+ * Handles a missing lockDir gracefully (no error).
+ */
+export const pruneStale = async (
+  lockDir: string,
+  activeWorktreeNames: Set<string>,
+): Promise<void> => {
+  let entries: string[];
+  try {
+    entries = await readdir(lockDir);
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+
+  for (const entry of entries) {
+    if (!entry.endsWith(".lock")) continue;
+
+    const worktreeName = entry.slice(0, -".lock".length);
+    const lockPath = join(lockDir, entry);
+
+    if (!activeWorktreeNames.has(worktreeName)) {
+      // Orphaned lock — worktree no longer exists
+      await rm(lockPath, { force: true });
+      continue;
+    }
+
+    // Active worktree — check PID liveness
+    try {
+      const raw = await readFile(lockPath, "utf-8");
+      const lockData = JSON.parse(raw) as LockData;
+      if (!isPidAlive(lockData.pid)) {
+        await rm(lockPath, { force: true });
+      }
+    } catch {
+      // Corrupt/unreadable lock — treat as stale
+      await rm(lockPath, { force: true });
+    }
   }
 };

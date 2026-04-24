@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   acquire,
+  pruneStale,
   release,
   WorktreeLockError,
   type LockData,
@@ -153,5 +154,75 @@ describe("WorktreeLock", () => {
     } finally {
       await rm(lockDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("WorktreeLock.pruneStale", () => {
+  it("removes lock files whose worktree is not in the active set", async () => {
+    const lockDir = await makeTmpDir();
+    try {
+      // Create a lock for a worktree that is NOT in the active set
+      const lockPath = join(lockDir, "orphan-worktree.lock");
+      const lockData: LockData = {
+        pid: process.pid,
+        branch: "orphan-branch",
+        acquiredAt: new Date().toISOString(),
+      };
+      await writeFile(lockPath, JSON.stringify(lockData, null, 2));
+
+      // Active set does NOT include "orphan-worktree"
+      await pruneStale(lockDir, new Set(["other-worktree"]));
+
+      expect(existsSync(lockPath)).toBe(false);
+    } finally {
+      await rm(lockDir, { recursive: true, force: true });
+    }
+  });
+
+  it("removes lock files whose owning PID is dead", async () => {
+    const lockDir = await makeTmpDir();
+    try {
+      const lockPath = join(lockDir, "dead-pid-worktree.lock");
+      const lockData: LockData = {
+        pid: 999999999, // PID that almost certainly doesn't exist
+        branch: "some-branch",
+        acquiredAt: "2025-01-01T00:00:00.000Z",
+      };
+      await writeFile(lockPath, JSON.stringify(lockData, null, 2));
+
+      // Worktree IS in the active set, but owning PID is dead
+      await pruneStale(lockDir, new Set(["dead-pid-worktree"]));
+
+      expect(existsSync(lockPath)).toBe(false);
+    } finally {
+      await rm(lockDir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves lock files for live processes with active worktrees", async () => {
+    const lockDir = await makeTmpDir();
+    try {
+      const lockPath = join(lockDir, "live-worktree.lock");
+      const lockData: LockData = {
+        pid: process.pid, // Current process — definitely alive
+        branch: "active-branch",
+        acquiredAt: new Date().toISOString(),
+      };
+      await writeFile(lockPath, JSON.stringify(lockData, null, 2));
+
+      // Worktree IS in the active set and PID is alive
+      await pruneStale(lockDir, new Set(["live-worktree"]));
+
+      expect(existsSync(lockPath)).toBe(true);
+    } finally {
+      await rm(lockDir, { recursive: true, force: true });
+    }
+  });
+
+  it("handles missing lock directory gracefully", async () => {
+    // Pass a path that does not exist
+    await expect(
+      pruneStale("/tmp/nonexistent-lock-dir-" + Date.now(), new Set()),
+    ).resolves.toBeUndefined();
   });
 });

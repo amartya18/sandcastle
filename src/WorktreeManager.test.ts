@@ -405,6 +405,34 @@ describe("WorktreeManager.pruneStale", () => {
     // suppress unused var warning
     void name;
   });
+
+  it("cleans up a stale lock left by a simulated crash", async () => {
+    const repoDir = await setupRepo();
+    const { path } = await run(create(repoDir, { branch: "crash-branch" }));
+    const worktreeName = path.split("/").pop()!;
+
+    // Write a stale lock file (simulates a process that crashed without releasing)
+    const lockDir = join(repoDir, ".sandcastle", "locks");
+    await mkdir(lockDir, { recursive: true });
+    const lockPath = join(lockDir, `${worktreeName}.lock`);
+    await writeFile(
+      lockPath,
+      JSON.stringify({
+        pid: 999999999, // dead PID
+        branch: "crash-branch",
+        acquiredAt: "2025-01-01T00:00:00.000Z",
+      }),
+    );
+
+    // pruneStale should remove the stale lock (dead PID)
+    await run(pruneStale(repoDir));
+
+    const entries = await readdir(lockDir).catch(() => []);
+    expect(entries).not.toContain(`${worktreeName}.lock`);
+
+    // cleanup
+    await run(remove(path));
+  });
 });
 
 describe("WorktreeManager.hasUncommittedChanges", () => {
