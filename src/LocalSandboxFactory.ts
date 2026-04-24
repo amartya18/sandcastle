@@ -78,14 +78,9 @@ export const makeLocalSandboxFactoryLayer = (
 
           // Set up worktree / branch per strategy
           let workDir = sandboxDir;
-          let branch = "main";
 
-          if (options.branchStrategy.type === "head") {
-            // head mode: work directly in the repo dir on main
-            // nothing extra
-          } else if (options.branchStrategy.type === "merge-to-head") {
-            // create a temp branch from HEAD
-            branch = `sandcastle/test-${Date.now()}`;
+          if (options.branchStrategy.type === "merge-to-head") {
+            const branch = `sandcastle/test-${Date.now()}`;
             const worktreeDir = await mkdtemp(
               join(tmpdir(), "local-sandbox-worktree-"),
             );
@@ -95,7 +90,7 @@ export const makeLocalSandboxFactoryLayer = (
             );
             workDir = worktreeDir;
           } else if (options.branchStrategy.type === "branch") {
-            branch = options.branchStrategy.branch;
+            const branch = options.branchStrategy.branch;
             const worktreeDir = await mkdtemp(
               join(tmpdir(), "local-sandbox-worktree-"),
             );
@@ -114,7 +109,7 @@ export const makeLocalSandboxFactoryLayer = (
             workDir = worktreeDir;
           }
 
-          return { sandboxDir, workDir, branch };
+          return { sandboxDir, workDir };
         }),
         // Use
         ({ workDir }) => {
