@@ -166,9 +166,13 @@ export const create = (
     const worktreePath = join(worktreesDir, worktreeName);
 
     if (opts?.branch) {
-      // Proactively detect collision before git produces a confusing error
+      // Proactively detect collision before git produces a confusing error.
+      // Match by branch first; fall back to target path (covers mid-rebase
+      // detached-HEAD state where the branch field is null).
       const existing = yield* listWorktrees(repoDir);
-      const collision = existing.find((wt) => wt.branch === branch);
+      const collision =
+        existing.find((wt) => wt.branch === branch) ??
+        existing.find((wt) => wt.path === worktreePath);
       if (collision) {
         // Only reuse worktrees managed by sandcastle (under .sandcastle/worktrees/)
         const isManagedWorktree = collision.path.startsWith(worktreesDir);
