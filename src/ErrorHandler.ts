@@ -34,6 +34,7 @@ export const formatErrorMessage = (error: SandboxError): string => {
     case "WorktreeTimeoutError":
     case "ContainerStartTimeoutError":
     case "CopyToWorktreeTimeoutError":
+    case "CopyToWorktreeError":
     case "SyncInTimeoutError":
     case "HookTimeoutError":
     case "GitSetupTimeoutError":
@@ -78,6 +79,7 @@ export const withFriendlyErrors = <A, E, R>(
     WorktreeTimeoutError: showErrorAndExit,
     ContainerStartTimeoutError: showErrorAndExit,
     CopyToWorktreeTimeoutError: showErrorAndExit,
+    CopyToWorktreeError: showErrorAndExit,
     SyncInTimeoutError: showErrorAndExit,
     HookTimeoutError: showErrorAndExit,
     GitSetupTimeoutError: showErrorAndExit,

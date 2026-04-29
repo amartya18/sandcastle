@@ -96,6 +96,16 @@ export class CopyToWorktreeTimeoutError extends Data.TaggedError(
   readonly paths: string[];
 }> {}
 
+/** Fallback cp -R to worktree failed */
+export class CopyToWorktreeError extends Data.TaggedError(
+  "CopyToWorktreeError",
+)<{
+  readonly message: string;
+  readonly path: string;
+  readonly stderr: string;
+  readonly exitCode: number | null;
+}> {}
+
 /** Git sync-in for isolated providers timed out */
 export class SyncInTimeoutError extends Data.TaggedError("SyncInTimeoutError")<{
   readonly message: string;
@@ -189,6 +199,7 @@ export type SandboxError =
   | WorktreeTimeoutError
   | ContainerStartTimeoutError
   | CopyToWorktreeTimeoutError
+  | CopyToWorktreeError
   | SyncInTimeoutError
   | HookTimeoutError
   | GitSetupTimeoutError

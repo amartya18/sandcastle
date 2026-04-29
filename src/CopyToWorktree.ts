@@ -2,7 +2,11 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { CopyToWorktreeTimeoutError, withTimeout } from "./errors.js";
+import {
+  CopyToWorktreeError,
+  CopyToWorktreeTimeoutError,
+  withTimeout,
+} from "./errors.js";
 
 const COPY_TO_WORKTREE_TIMEOUT_MS = 60_000;
 
@@ -15,7 +19,7 @@ export const copyToWorktree = (
   paths: string[],
   hostRepoDir: string,
   worktreePath: string,
-): Effect.Effect<void, CopyToWorktreeTimeoutError> =>
+): Effect.Effect<void, CopyToWorktreeTimeoutError | CopyToWorktreeError> =>
   Effect.gen(function* () {
     for (const relativePath of paths) {
       const src = join(hostRepoDir, relativePath);
@@ -23,12 +27,28 @@ export const copyToWorktree = (
         continue;
       }
       const dest = join(worktreePath, relativePath);
-      yield* Effect.async<void, never>((resume) => {
+      yield* Effect.async<void, CopyToWorktreeError>((resume) => {
         execFile("cp", ["-R", "--reflink=auto", src, dest], (error) => {
           if (error) {
             // Fall back to a regular copy if reflink is not supported
-            execFile("cp", ["-R", src, dest], () => {
-              resume(Effect.succeed(undefined));
+            execFile("cp", ["-R", src, dest], (fallbackError, _, stderr) => {
+              if (fallbackError) {
+                resume(
+                  Effect.fail(
+                    new CopyToWorktreeError({
+                      message: `Failed to copy ${relativePath} to worktree: ${stderr || fallbackError.message}`,
+                      path: relativePath,
+                      stderr: stderr || fallbackError.message,
+                      exitCode:
+                        typeof fallbackError.code === "number"
+                          ? fallbackError.code
+                          : null,
+                    }),
+                  ),
+                );
+              } else {
+                resume(Effect.succeed(undefined));
+              }
             });
           } else {
             resume(Effect.succeed(undefined));
