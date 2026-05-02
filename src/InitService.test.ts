@@ -1227,9 +1227,25 @@ describe("InitService scaffold", () => {
       );
       expect(prompt).toContain("bd ready --json");
       expect(prompt).toContain("bd close");
-      expect(prompt).not.toContain("gh issue");
+      expect(prompt).not.toContain("gh issue list");
+      expect(prompt).not.toContain("gh issue close");
       expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
       expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+    });
+
+    it("simple-loop prompt uses backlog-agnostic language", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        backlogManager: getBacklogManager("beads"),
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).not.toContain("GitHub issue");
+      expect(prompt).not.toContain("GitHub issues");
     });
 
     it("simple-loop with beads skips --label Sandcastle (no label to strip)", async () => {
@@ -1324,9 +1340,25 @@ describe("InitService scaffold", () => {
       );
       expect(prompt).toContain("bd ready --json");
       expect(prompt).toContain("bd close");
-      expect(prompt).not.toContain("gh issue");
+      expect(prompt).not.toContain("gh issue list");
+      expect(prompt).not.toContain("gh issue close");
       expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
       expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+    });
+
+    it("sequential-reviewer implement-prompt uses backlog-agnostic language", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "sequential-reviewer",
+        backlogManager: getBacklogManager("beads"),
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).not.toContain("GitHub issue");
+      expect(prompt).not.toContain("GitHub issues");
     });
 
     // --- blank ---

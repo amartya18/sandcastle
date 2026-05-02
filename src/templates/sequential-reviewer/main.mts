@@ -1,7 +1,7 @@
 // Sequential Reviewer — implement-then-review loop
 //
 // This template drives a two-phase workflow per issue:
-//   Phase 1 (Implement): A sonnet agent picks an open GitHub issue, works on it
+//   Phase 1 (Implement): A sonnet agent picks an open issue, works on it
 //                        on a dedicated branch, commits the changes, and signals
 //                        completion.
 //   Phase 2 (Review):    A second sonnet agent reviews the branch diff and either
@@ -48,7 +48,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // -------------------------------------------------------------------------
   // Phase 1: Implement
   //
-  // A sonnet agent picks the next open GitHub issue, creates a branch, writes
+  // A sonnet agent picks the next open issue, creates a branch, writes
   // the implementation (using RGR: Red → Green → Repeat → Refactor), and
   // commits the result.
   //
