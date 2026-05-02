@@ -284,7 +284,7 @@ describe("InitService scaffold", () => {
     await expect(access(join(configDir, "main.mts"))).resolves.toBeUndefined();
   });
 
-  it("blank template main.mts imports from @ai-hero/sandcastle", async () => {
+  it("blank template main.mts imports from @amartya18/sandcastle", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "blank" });
 
@@ -292,7 +292,7 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", "main.mts"),
       "utf-8",
     );
-    expect(mainTs).toContain('"@ai-hero/sandcastle"');
+    expect(mainTs).toContain('"@amartya18/sandcastle"');
   });
 
   it("blank template main.mts calls run()", async () => {
@@ -362,7 +362,7 @@ describe("InitService scaffold", () => {
     await expect(access(join(configDir, "prompt.md"))).resolves.toBeUndefined();
   });
 
-  it("simple-loop main.mts imports from @ai-hero/sandcastle", async () => {
+  it("simple-loop main.mts imports from @amartya18/sandcastle", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
 
@@ -370,7 +370,7 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", "main.mts"),
       "utf-8",
     );
-    expect(mainTs).toContain('"@ai-hero/sandcastle"');
+    expect(mainTs).toContain('"@amartya18/sandcastle"');
   });
 
   it("simple-loop main.mts contains sandcastle.run() with expected options", async () => {
@@ -423,7 +423,7 @@ describe("InitService scaffold", () => {
       ).resolves.toBeUndefined();
     });
 
-    it("main.mts imports from @ai-hero/sandcastle", async () => {
+    it("main.mts imports from @amartya18/sandcastle", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
@@ -431,7 +431,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain('"@ai-hero/sandcastle"');
+      expect(mainTs).toContain('"@amartya18/sandcastle"');
     });
 
     it("main.mts calls sandcastle.run() twice per iteration (implement + review)", async () => {
@@ -825,7 +825,7 @@ describe("InitService scaffold", () => {
       expect(mainTs).toContain("sandcastle");
     });
 
-    it("main.mts imports from @ai-hero/sandcastle", async () => {
+    it("main.mts imports from @amartya18/sandcastle", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner" });
 
@@ -833,7 +833,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain('"@ai-hero/sandcastle"');
+      expect(mainTs).toContain('"@amartya18/sandcastle"');
     });
 
     it("main.mts references the specified model for all factory calls", async () => {
@@ -928,7 +928,7 @@ describe("InitService scaffold", () => {
       ).resolves.toBeUndefined();
     });
 
-    it("main.mts imports from @ai-hero/sandcastle", async () => {
+    it("main.mts imports from @amartya18/sandcastle", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
@@ -936,7 +936,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain('"@ai-hero/sandcastle"');
+      expect(mainTs).toContain('"@amartya18/sandcastle"');
     });
 
     it("main.mts uses createSandbox for shared sandbox per branch", async () => {
@@ -1803,7 +1803,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainContent).toContain("@ai-hero/sandcastle");
+      expect(mainContent).toContain("@amartya18/sandcastle");
     });
 
     it("scaffolds main.mts when package.json has type: commonjs", async () => {
@@ -1848,7 +1848,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.ts"),
         "utf-8",
       );
-      expect(mainContent).toContain("@ai-hero/sandcastle");
+      expect(mainContent).toContain("@amartya18/sandcastle");
       expect(mainContent).toContain('claudeCode("claude-opus-4-6")');
     });
 
