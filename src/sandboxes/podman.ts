@@ -23,7 +23,12 @@ import {
   type InteractiveExecOptions,
 } from "../SandboxProvider.js";
 import type { MountConfig } from "../MountConfig.js";
-import { defaultImageName, resolveUserMounts } from "../mountUtils.js";
+import type { SelinuxLabel } from "../mountUtils.js";
+import {
+  defaultImageName,
+  resolveUserMounts,
+  formatVolumeMount,
+} from "../mountUtils.js";
 
 export interface PodmanOptions {
   /** Podman image name (default: derived from repo directory name). */
@@ -35,7 +40,7 @@ export interface PodmanOptions {
    * - `"Z"` — private label; only this container can access the mount.
    * - `false` — disable labeling entirely.
    */
-  readonly selinuxLabel?: "z" | "Z" | false;
+  readonly selinuxLabel?: SelinuxLabel;
   /**
    * User namespace mode for rootless Podman.
    *
@@ -395,14 +400,3 @@ const checkPodmanMachine = (): Promise<void> =>
     );
   });
 
-const formatVolumeMount = (
-  mount: { hostPath: string; sandboxPath: string; readonly?: boolean },
-  selinuxLabel: PodmanOptions["selinuxLabel"],
-): string => {
-  const base = `${mount.hostPath}:${mount.sandboxPath}`;
-  const options = [mount.readonly ? "ro" : undefined, selinuxLabel || undefined]
-    .filter((option): option is string => option !== undefined)
-    .join(",");
-
-  return options ? `${base}:${options}` : base;
-};

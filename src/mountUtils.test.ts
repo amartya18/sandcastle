@@ -8,6 +8,7 @@ import {
   normalizeMounts,
   parseGitdirPath,
   patchGitMountsForWindows,
+  formatVolumeMount,
   PARENT_GIT_SANDBOX_DIR,
 } from "./mountUtils.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
@@ -548,5 +549,79 @@ describe("patchGitMountsForWindows", () => {
         `gitdir: ${PARENT_GIT_SANDBOX_DIR}/worktrees/backslash-wt\n`,
       );
     });
+  });
+});
+
+describe("formatVolumeMount", () => {
+  it("formats basic mount without options", () => {
+    expect(
+      formatVolumeMount(
+        { hostPath: "/host", sandboxPath: "/sandbox" },
+        false,
+      ),
+    ).toBe("/host:/sandbox");
+  });
+
+  it("appends :z when selinuxLabel is 'z'", () => {
+    expect(
+      formatVolumeMount(
+        { hostPath: "/host", sandboxPath: "/sandbox" },
+        "z",
+      ),
+    ).toBe("/host:/sandbox:z");
+  });
+
+  it("appends :Z when selinuxLabel is 'Z'", () => {
+    expect(
+      formatVolumeMount(
+        { hostPath: "/host", sandboxPath: "/sandbox" },
+        "Z",
+      ),
+    ).toBe("/host:/sandbox:Z");
+  });
+
+  it("appends :ro when readonly is true and no SELinux", () => {
+    expect(
+      formatVolumeMount(
+        { hostPath: "/host", sandboxPath: "/sandbox", readonly: true },
+        false,
+      ),
+    ).toBe("/host:/sandbox:ro");
+  });
+
+  it("combines ro and z options", () => {
+    expect(
+      formatVolumeMount(
+        { hostPath: "/host", sandboxPath: "/sandbox", readonly: true },
+        "z",
+      ),
+    ).toBe("/host:/sandbox:ro,z");
+  });
+
+  it("combines ro and Z options", () => {
+    expect(
+      formatVolumeMount(
+        { hostPath: "/host", sandboxPath: "/sandbox", readonly: true },
+        "Z",
+      ),
+    ).toBe("/host:/sandbox:ro,Z");
+  });
+
+  it("omits options for writable mount with selinuxLabel false", () => {
+    const result = formatVolumeMount(
+      { hostPath: "/host", sandboxPath: "/sandbox" },
+      false,
+    );
+    expect(result).toBe("/host:/sandbox");
+    expect(result).not.toContain("::");
+  });
+
+  it("accepts undefined selinuxLabel (treated as false)", () => {
+    expect(
+      formatVolumeMount(
+        { hostPath: "/host", sandboxPath: "/sandbox" },
+        undefined,
+      ),
+    ).toBe("/host:/sandbox");
   });
 });

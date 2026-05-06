@@ -13,6 +13,15 @@ import type { MountConfig } from "./MountConfig.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 
 /**
+ * SELinux volume label suffix applied to bind mounts.
+ *
+ * - `"z"` — shared label. No-op on non-SELinux systems.
+ * - `"Z"` — private label; only this container can access the mount.
+ * - `false` — disable labeling entirely.
+ */
+export type SelinuxLabel = "z" | "Z" | false;
+
+/**
  * Deterministic mount point inside the sandbox for the parent repo's .git
  * directory when the workspace is a git worktree. See ADR-0006.
  */
@@ -290,4 +299,23 @@ export const patchGitMountsForWindows = async (
   }
 
   return correctedMounts;
+};
+
+/**
+ * Format a bind mount into a `-v` style string for container runtimes.
+ *
+ * Produces: `hostPath:sandboxPath[:ro][,z|Z]`
+ *
+ * Used by both Podman and Docker providers.
+ */
+export const formatVolumeMount = (
+  mount: { hostPath: string; sandboxPath: string; readonly?: boolean },
+  selinuxLabel: SelinuxLabel | undefined,
+): string => {
+  const base = `${mount.hostPath}:${mount.sandboxPath}`;
+  const options = [mount.readonly ? "ro" : undefined, selinuxLabel || undefined]
+    .filter((option): option is string => option !== undefined)
+    .join(",");
+
+  return options ? `${base}:${options}` : base;
 };

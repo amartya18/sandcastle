@@ -25,12 +25,12 @@ import {
   type InteractiveExecOptions,
 } from "../SandboxProvider.js";
 import type { MountConfig } from "../MountConfig.js";
+import type { SelinuxLabel } from "../mountUtils.js";
 import { defaultImageName, resolveUserMounts } from "../mountUtils.js";
 
 export interface DockerOptions {
   /** Docker image name (default: derived from repo directory name). */
   readonly imageName?: string;
-  /**
    * The UID of the `agent` user inside the container image (default: host UID via `process.getuid()`, or 1000).
    *
    * Must match the UID baked into the image at build time. Used as the `--user` flag value
@@ -43,6 +43,14 @@ export interface DockerOptions {
    * Must match the GID baked into the image at build time. Used as the `--user` flag value.
    */
   readonly containerGid?: number;
+  /**
+   * SELinux volume label suffix applied to bind mounts.
+   *
+   * - `"z"` — shared label (default). No-op on non-SELinux systems.
+   * - `"Z"` — private label; only this container can access the mount.
+   * - `false` — disable labeling entirely.
+   */
+  readonly selinuxLabel?: SelinuxLabel;
   /**
    * Additional host directories to bind-mount into the sandbox.
    *
@@ -71,6 +79,7 @@ export interface DockerOptions {
  */
 export const docker = (options?: DockerOptions): SandboxProvider => {
   const configuredImageName = options?.imageName;
+  const selinuxLabel = options?.selinuxLabel ?? "z";
   const sandboxHomedir = "/home/agent";
   const userMounts = options?.mounts
     ? resolveUserMounts(options.mounts, sandboxHomedir)
@@ -124,6 +133,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             workdir: worktreePath,
             user: `${containerUid}:${containerGid}`,
             network: options?.network,
+            selinuxLabel,
           },
         ),
       );

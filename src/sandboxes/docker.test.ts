@@ -47,6 +47,15 @@ describe("docker()", () => {
     expect("branchStrategy" in provider).toBe(false);
   });
 
+  it("accepts selinuxLabel option", () => {
+    const withZ = docker({ selinuxLabel: "z" });
+    const withBigZ = docker({ selinuxLabel: "Z" });
+    const withFalse = docker({ selinuxLabel: false });
+    expect(withZ.tag).toBe("bind-mount");
+    expect(withBigZ.tag).toBe("bind-mount");
+    expect(withFalse.tag).toBe("bind-mount");
+  });
+
   it("accepts a mounts option with valid paths", () => {
     const provider = docker({
       mounts: [{ hostPath: "~", sandboxPath: "/mnt/home" }],
@@ -364,6 +373,88 @@ describe("docker()", () => {
     expect(cpArgs[0]).toBe("cp");
     expect(cpArgs[1]).toMatch(/^sandcastle-.*:\/sandbox\/output\.txt$/);
     expect(cpArgs[2]).toBe("/host/output.txt");
+
+    await handle.close();
+  });
+
+  it("default mounts include :z SELinux label", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = docker();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    const runArgs = runCall![1] as string[];
+    const vIdx = runArgs.indexOf("-v");
+    expect(vIdx).toBeGreaterThan(-1);
+    expect(runArgs[vIdx + 1]).toMatch(/:z$/);
+
+    await handle.close();
+  });
+
+  it("selinuxLabel 'Z' produces :Z suffix on mounts", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = docker({ selinuxLabel: "Z" });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    const runArgs = runCall![1] as string[];
+    const vIdx = runArgs.indexOf("-v");
+    expect(runArgs[vIdx + 1]).toMatch(/:Z$/);
+
+    await handle.close();
+  });
+
+  it("selinuxLabel false produces no SELinux suffix on mounts", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = docker({ selinuxLabel: false });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    const runArgs = runCall![1] as string[];
+    const vIdx = runArgs.indexOf("-v");
+    expect(runArgs[vIdx + 1]).toBe("/tmp/worktree:/home/agent/workspace");
 
     await handle.close();
   });
