@@ -28,6 +28,7 @@ import {
   defaultImageName,
   resolveUserMounts,
   formatVolumeMount,
+  processFileMountParents,
 } from "../mountUtils.js";
 
 export interface PodmanOptions {
@@ -102,6 +103,12 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
   const userMounts = options?.mounts
     ? resolveUserMounts(options.mounts, sandboxHomedir)
     : [];
+  // Validate file mounts and collect parent dirs to create at container start.
+  // Throws at construction time if any file mount parent is outside sandboxHomedir.
+  const parentDirsToCreate = processFileMountParents(
+    userMounts,
+    sandboxHomedir,
+  );
 
   return createBindMountSandboxProvider({
     name: "podman",
@@ -182,6 +189,35 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
           },
         );
       });
+
+      // Create parent directories for file mounts and chown to the container user
+      for (const dir of parentDirsToCreate) {
+        await new Promise<void>((resolve, reject) => {
+          execFile(
+            "podman",
+            [
+              "exec",
+              "--user",
+              "0:0",
+              containerName,
+              "sh",
+              "-c",
+              `mkdir -p "${dir}" && chown ${containerUid}:${containerGid} "${dir}"`,
+            ],
+            (error) => {
+              if (error) {
+                reject(
+                  new Error(
+                    `Failed to create parent directory '${dir}' in container: ${error.message}`,
+                  ),
+                );
+              } else {
+                resolve();
+              }
+            },
+          );
+        });
+      }
 
       // Set up signal handlers for cleanup
       const onExit = () => {

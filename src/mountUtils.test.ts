@@ -9,6 +9,7 @@ import {
   parseGitdirPath,
   patchGitMountsForWindows,
   formatVolumeMount,
+  processFileMountParents,
   PARENT_GIT_SANDBOX_DIR,
 } from "./mountUtils.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
@@ -623,5 +624,127 @@ describe("formatVolumeMount", () => {
         undefined,
       ),
     ).toBe("/host:/sandbox");
+  });
+});
+
+describe("processFileMountParents", () => {
+  const sandboxHomedir = "/home/agent";
+  const fileStatFn = () => ({ isFile: () => true });
+  const dirStatFn = () => ({ isFile: () => false });
+
+  it("returns parent dir for a file mount under /home/agent", () => {
+    const mounts = [
+      {
+        hostPath: "/host/.codex/auth.json",
+        sandboxPath: "/home/agent/.codex/auth.json",
+      },
+    ];
+    const result = processFileMountParents(mounts, sandboxHomedir, fileStatFn);
+    expect(result).toEqual(["/home/agent/.codex"]);
+  });
+
+  it("throws for a file mount whose parent is outside /home/agent", () => {
+    const mounts = [
+      {
+        hostPath: "/host/config.json",
+        sandboxPath: "/opt/foo/config.json",
+      },
+    ];
+    expect(() =>
+      processFileMountParents(mounts, sandboxHomedir, fileStatFn),
+    ).toThrow(/parent directory.*\/opt\/foo.*outside the agent home/i);
+  });
+
+  it("error message includes remediation guidance", () => {
+    const mounts = [
+      {
+        hostPath: "/host/config.json",
+        sandboxPath: "/opt/foo/config.json",
+      },
+    ];
+    expect(() =>
+      processFileMountParents(mounts, sandboxHomedir, fileStatFn),
+    ).toThrow(/mount the parent directory instead.*or rebuild/i);
+  });
+
+  it("returns empty array for directory mounts", () => {
+    const mounts = [
+      {
+        hostPath: "/host/data",
+        sandboxPath: "/home/agent/data",
+      },
+    ];
+    const result = processFileMountParents(mounts, sandboxHomedir, dirStatFn);
+    expect(result).toEqual([]);
+  });
+
+  it("skips mounts whose parent IS /home/agent itself", () => {
+    const mounts = [
+      {
+        hostPath: "/host/.gitconfig",
+        sandboxPath: "/home/agent/.gitconfig",
+      },
+    ];
+    const result = processFileMountParents(mounts, sandboxHomedir, fileStatFn);
+    expect(result).toEqual([]);
+  });
+
+  it("deduplicates parent dirs across multiple file mounts", () => {
+    const mounts = [
+      {
+        hostPath: "/host/.codex/auth.json",
+        sandboxPath: "/home/agent/.codex/auth.json",
+      },
+      {
+        hostPath: "/host/.codex/config.json",
+        sandboxPath: "/home/agent/.codex/config.json",
+      },
+    ];
+    const result = processFileMountParents(mounts, sandboxHomedir, fileStatFn);
+    expect(result).toEqual(["/home/agent/.codex"]);
+  });
+
+  it("returns multiple distinct parent dirs", () => {
+    const mounts = [
+      {
+        hostPath: "/host/.codex/auth.json",
+        sandboxPath: "/home/agent/.codex/auth.json",
+      },
+      {
+        hostPath: "/host/.claude/settings.json",
+        sandboxPath: "/home/agent/.claude/settings.json",
+      },
+    ];
+    const result = processFileMountParents(mounts, sandboxHomedir, fileStatFn);
+    expect(result).toEqual(["/home/agent/.codex", "/home/agent/.claude"]);
+  });
+
+  it("skips mounts that cannot be stat'd", () => {
+    const throwStatFn = () => {
+      throw new Error("ENOENT");
+    };
+    const mounts = [
+      {
+        hostPath: "/host/missing",
+        sandboxPath: "/home/agent/.codex/missing",
+      },
+    ];
+    const result = processFileMountParents(
+      mounts,
+      sandboxHomedir,
+      throwStatFn,
+    );
+    expect(result).toEqual([]);
+  });
+
+  it("handles deeply nested file mounts under /home/agent", () => {
+    const mounts = [
+      {
+        hostPath: "/host/deep.json",
+        sandboxPath: "/home/agent/.config/deep/nested/file.json",
+      },
+    ];
+    const result = processFileMountParents(mounts, sandboxHomedir, fileStatFn);
+    expect(result).toEqual(["/home/agent/.config/deep/nested"]);
   });
 });

@@ -26,7 +26,11 @@ import {
 } from "../SandboxProvider.js";
 import type { MountConfig } from "../MountConfig.js";
 import type { SelinuxLabel } from "../mountUtils.js";
-import { defaultImageName, resolveUserMounts } from "../mountUtils.js";
+import {
+  defaultImageName,
+  resolveUserMounts,
+  processFileMountParents,
+} from "../mountUtils.js";
 
 export interface DockerOptions {
   /** Docker image name (default: derived from repo directory name). */
@@ -84,6 +88,12 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
   const userMounts = options?.mounts
     ? resolveUserMounts(options.mounts, sandboxHomedir)
     : [];
+  // Validate file mounts and collect parent dirs to create at container start.
+  // Throws at construction time if any file mount parent is outside sandboxHomedir.
+  const parentDirsToCreate = processFileMountParents(
+    userMounts,
+    sandboxHomedir,
+  );
 
   return createBindMountSandboxProvider({
     name: "docker",
@@ -137,6 +147,35 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           },
         ),
       );
+
+      // Create parent directories for file mounts and chown to the container user
+      for (const dir of parentDirsToCreate) {
+        await new Promise<void>((resolve, reject) => {
+          execFile(
+            "docker",
+            [
+              "exec",
+              "--user",
+              "0:0",
+              containerName,
+              "sh",
+              "-c",
+              `mkdir -p "${dir}" && chown ${hostUid}:${hostGid} "${dir}"`,
+            ],
+            (error) => {
+              if (error) {
+                reject(
+                  new Error(
+                    `Failed to create parent directory '${dir}' in container: ${error.message}`,
+                  ),
+                );
+              } else {
+                resolve();
+              }
+            },
+          );
+        });
+      }
 
       // Set up signal handlers for cleanup
       const onExit = () => {
