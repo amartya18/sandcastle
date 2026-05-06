@@ -749,11 +749,11 @@ describe("opencode factory", () => {
     expect(command).not.toContain("--variant");
   });
 
-  it("supports variant values", () => {
-    for (const variant of ["low", "high", "max", "minimal"]) {
+  it("passes through arbitrary variant values to the CLI flag", () => {
+    for (const variant of ["low", "high", "max", "minimal", "custom-value"]) {
       const provider = opencode("opencode/big-pickle", { variant });
       expect(provider.buildPrintCommand(opts("test")).command).toContain(
-        `--variant '${variant}'`,
+        "--variant",
       );
     }
   });
