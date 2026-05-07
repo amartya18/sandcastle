@@ -146,6 +146,9 @@ const result = await run({
       { hostPath: "~/.npm", sandboxPath: "/home/agent/.npm", readonly: true },
       { hostPath: "data", sandboxPath: "data" }, // mounts <cwd>/data → <sandbox-repo>/data
     ],
+    // Optional: SELinux volume label — "z" (default, shared), "Z" (private), or false (none).
+    // No-op on non-SELinux systems (Docker Desktop on macOS/Windows, Linux without SELinux).
+    selinuxLabel: "z",
     // Optional: provider-level env vars merged at launch time
     env: { DOCKER_SPECIFIC: "value" },
     // Optional: attach container to Docker network(s) — string or string[]
@@ -1131,7 +1134,7 @@ const result = await run({
 
 For real-world examples, see:
 
-- [`src/sandboxes/docker.ts`](src/sandboxes/docker.ts) — bind-mount provider using Docker containers
+- [`src/sandboxes/docker.ts`](src/sandboxes/docker.ts) — bind-mount provider using Docker containers (with SELinux label support)
 - [`src/sandboxes/vercel.ts`](src/sandboxes/vercel.ts) — isolated provider using Vercel Firecracker microVMs via `@vercel/sandbox`
 - [`src/sandboxes/podman.ts`](src/sandboxes/podman.ts) — bind-mount provider using Podman containers (with SELinux label support)
 - [`src/sandboxes/test-isolated.ts`](src/sandboxes/test-isolated.ts) — isolated provider using temp directories (used in tests)
