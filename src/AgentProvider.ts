@@ -21,7 +21,11 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
 const extractErrorMessage = (obj: any): string | undefined => {
   const err = obj.error;
   if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null && typeof err.message === "string") {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    typeof err.message === "string"
+  ) {
     return err.message;
   }
   if (typeof obj.message === "string") return obj.message;
@@ -121,7 +125,7 @@ export interface AgentProvider {
   parseSessionUsage?(content: string): IterationUsage | undefined;
 }
 
-export const DEFAULT_MODEL = "claude-opus-4-6";
+export const DEFAULT_MODEL = "claude-opus-4-7";
 
 // ---------------------------------------------------------------------------
 // Pi agent provider
@@ -304,6 +308,8 @@ export const codex = (
 
 /** Options for the opencode agent provider. */
 export interface OpenCodeOptions {
+  /** Provider-specific reasoning effort variant (e.g. "high", "max", "low", "minimal"). */
+  readonly variant?: string;
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
 }
@@ -317,8 +323,11 @@ export const opencode = (
   captureSessions: false,
 
   buildPrintCommand({ prompt }: AgentCommandOptions): PrintCommand {
+    const variantFlag = options?.variant
+      ? ` --variant ${shellEscape(options.variant)}`
+      : "";
     return {
-      command: `opencode run --model ${shellEscape(model)} ${shellEscape(prompt)}`,
+      command: `opencode run --model ${shellEscape(model)}${variantFlag} ${shellEscape(prompt)}`,
     };
   },
 

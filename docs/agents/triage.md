@@ -15,3 +15,7 @@ The skills speak in terms of canonical category roles and canonical triage state
 For label-based trackers, the right-hand column is usually a label string. For Beads, category roles may map to issue types (for example `enhancement -> feature`) while the state roles still map to labels.
 
 Edit the right-hand column to match whatever tracker-native vocabulary you actually use.
+
+---
+
+When triaging or implementing requests for new agent CLI support (e.g. gemini-cli, cursor), see `docs/agents/adding-an-agent-provider.md` — it lists the CLI/output capabilities a new agent must satisfy and the files to touch.

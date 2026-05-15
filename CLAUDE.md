@@ -14,7 +14,7 @@ Issues live as GitHub issues in `amartya18/sandcastle`. See `docs/agents/issue-t
 
 ### Triage labels
 
-Default canonical category and triage labels (`bug`, `enhancement`, `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+Default canonical category and triage labels (`bug`, `enhancement`, `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage.md` for the role mapping and agent-provider triage notes.
 
 ### Domain docs
 
